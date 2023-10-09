@@ -1,5 +1,5 @@
 function humanReadableTime(timeInSeconds) {
-    if (!timeInSeconds) {
+    if (timeInSeconds === undefined || timeInSeconds === null) {
         return '';
     }
 
@@ -7,7 +7,7 @@ function humanReadableTime(timeInSeconds) {
     const hours = Math.floor(minutes / 60);
     minutes -= hours * 60;
 
-    return (hours > 0 ? `${hours} h ${minutes} min` : `${minutes} min`);
+    return (hours > 0 ? `${hours}h ${minutes}min` : `${minutes}min`);
 }
 
 export {

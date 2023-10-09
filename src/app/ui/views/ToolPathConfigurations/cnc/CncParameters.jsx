@@ -32,7 +32,8 @@ class CncParameters extends PureComponent {
 
         // size: PropTypes.object.isRequired,
         multipleEngine: PropTypes.bool.isRequired,
-        materials: PropTypes.object.isRequired
+        materials: PropTypes.object.isRequired,
+        isModel: PropTypes.bool.isRequired
     };
 
     state = {
@@ -42,7 +43,7 @@ class CncParameters extends PureComponent {
     };
 
     render() {
-        const { toolPath, materials, multipleEngine } = this.props;
+        const { toolPath, materials, multipleEngine, isModel } = this.props;
 
         const { name, type, gcodeConfig, useLegacyEngine } = toolPath;
 
@@ -95,9 +96,9 @@ class CncParameters extends PureComponent {
         });
 
         // Session Tool
-        const toolDefinitionToolKeys = [
+        const toolDefinitionToolKeys = (type === TOOLPATH_TYPE_VECTOR || isRotate) ? [
             'workSpeed', 'plungeSpeed', 'stepDown', 'stepOver'
-        ];
+        ] : ['workSpeed', 'plungeSpeed', 'stepDown', 'stepOver', 'toolExtensionEnabled'];
         const toolDefinitionTool = {};
         toolDefinitionToolKeys.forEach((key) => {
             if (allDefinition[key]) {
@@ -193,9 +194,7 @@ class CncParameters extends PureComponent {
                                             className={classNames(
                                                 'sm-parameter-row__select-md',
                                             )}
-                                            backspaceRemoves={false}
                                             clearable={false}
-                                            menuContainerStyle={{ zIndex: 5 }}
                                             name="carvePath"
                                             options={[
                                                 {
@@ -326,6 +325,7 @@ class CncParameters extends PureComponent {
                             setCurrentToolDefinition={this.props.setCurrentToolDefinition}
                             isModifiedDefinition={this.props.isModifiedDefinition}
                             setCurrentValueAsProfile={this.props.setCurrentValueAsProfile}
+                            isModel={isModel}
                         />
                         <ToolParameters
                             settings={toolDefinitionTool}

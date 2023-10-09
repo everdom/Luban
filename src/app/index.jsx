@@ -1,85 +1,84 @@
-/* eslint import/no-dynamic-require: 0 */
+import { ConfigProvider } from 'antd';
+import 'antd/dist/antd.css';
 import series from 'async/series';
-import moment from 'moment';
+import i18next from 'i18next';
+import LanguageDetector from 'i18next-browser-languagedetector';
+import i18nHttpApi from 'i18next-http-backend';
 import React from 'react';
 import ReactDOM from 'react-dom';
-import { ConfigProvider } from 'antd';
-import { Provider } from 'react-redux';
-import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import ReactGA from 'react-ga';
-import LanguageDetector from 'i18next-browser-languagedetector';
-import XHR from 'i18next-xhr-backend';
-import { TRACE, DEBUG, INFO, WARN, ERROR } from 'universal-logger';
-import settings from './config/settings';
-import { controller, screenController } from './lib/controller';
-import log from './lib/log';
-import { toQueryObject } from './lib/query';
-import user from './lib/user';
-import { machineStore } from './store/local-storage';
-import reduxStore from './store';
-import App from './ui/App';
-import './styles/vendor.styl';
-import './styles/app.styl';
-import 'antd/dist/antd.css';
+import { Provider } from 'react-redux';
 
-series([
-    (next) => {
-        // Setup log level
-        const queryParams = toQueryObject(window.location.search);
-        const level = {
-            trace: TRACE,
-            debug: DEBUG,
-            info: INFO,
-            warn: WARN,
-            error: ERROR
-        }[queryParams.log_level || settings.log.level];
-        log.setLevel(level);
-        next();
-    },
-    (next) => {
-        // Setup i18next
+import settings from './config/settings';
+import { controller } from './communication/socket-communication';
+import { initialize } from './lib/gaEvent';
+import log from './lib/log';
+import user from './lib/user';
+import reduxStore from './store';
+import { machineStore } from './store/local-storage';
+import './styles/app.styl';
+import './styles/vendor.styl';
+import workerManager from './lib/manager/workerManager';
+import App from './ui/App';
+
+
+function setupLog() {
+    log.setLevel(settings.log.level);
+}
+
+async function setupI18next() {
+    return new Promise((resolve) => {
         i18next
-            .use(XHR)
+            .use(i18nHttpApi)
             .use(LanguageDetector)
             .use(initReactI18next)
             .init(settings.i18next, () => {
-                next();
+                resolve();
             });
-    },
-    (next) => {
-        // Setup locale
-        const locale = i18next.language;
-        if (locale === 'en') {
-            next();
-            return;
-        }
+    });
+}
 
-        require(`bundle-loader!moment/locale/${locale}`)(() => {
-            log.debug(`moment: locale=${locale}`);
-            moment().locale(locale);
-            next();
-        });
+function setupWorkerManager() {
+    workerManager.initPool();
+}
+
+async function setup() {
+    log.info('Bootstrap');
+
+    // Setup log level
+    setupLog();
+
+    // Setup i18n
+    await setupI18next();
+
+    // Setup worker
+    setupWorkerManager();
+
+    log.info('Bootstrap finished.');
+}
+
+series([
+    async (next) => {
+        // setup
+        await setup();
+        next();
     },
     (next) => {
         const token = machineStore.get('session.token');
         user.signin({ token: token })
             .then(({ authenticated }) => {
                 if (authenticated) {
-                    log.debug('Create and establish a WebSocket connection');
+                    log.error('Create and establish a WebSocket connection');
                     controller.connect(() => {
-                        next();
-                    });
-                    screenController.connect(() => {
                         next();
                     });
                     return;
                 }
                 next();
             });
-    }
+    },
 ], () => {
-    log.info(`${settings.name} ${settings.version}`);
+    log.info(`Launching Snapmaker Luban v${settings.version}...`);
 
     // Prevent browser from loading a drag-and-dropped file
     // http://stackoverflow.com/questions/6756583/prevent-browser-from-loading-a-drag-and-dropped-file
@@ -103,8 +102,8 @@ series([
 
     const container = document.createElement('div');
     document.body.appendChild(container);
-
-    ReactGA.initialize('UA-106828154-1');
+    const userId = machineStore.get('userId');
+    initialize(userId);
 
     ReactDOM.render(
         <ConfigProvider autoInsertSpaceInButton={false}>

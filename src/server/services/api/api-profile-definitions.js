@@ -1,7 +1,19 @@
-import fs from 'fs';
+import * as fs from 'fs-extra';
 import path from 'path';
-import { ERR_BAD_REQUEST, ERR_INTERNAL_SERVER_ERROR, DEFINITION_SNAPMAKER_EXTRUDER_0, DEFINITION_SNAPMAKER_EXTRUDER_1, DEFINITION_ACTIVE, DEFINITION_ACTIVE_FINAL, KEY_DEFAULT_CATEGORY_CUSTOM, KEY_DEFAULT_CATEGORY_DEFAULT } from '../../constants';
-import { loadDefinitionsByPrefixName, loadAllSeriesDefinitions, DefinitionLoader } from '../../slicer';
+import {
+    DEFINITION_ACTIVE,
+    DEFINITION_ACTIVE_FINAL,
+    DEFINITION_SNAPMAKER_EXTRUDER_0,
+    DEFINITION_SNAPMAKER_EXTRUDER_1,
+    ERR_BAD_REQUEST,
+    ERR_INTERNAL_SERVER_ERROR,
+    ERR_NOT_FOUND,
+    HEAD_PRINTING,
+    KEY_DEFAULT_CATEGORY_CUSTOM,
+    KEY_DEFAULT_CATEGORY_DEFAULT
+} from '../../constants';
+import { getParameterKeys } from '../../slicer/definition';
+import { DefinitionLoader, loadAllSeriesDefinitions, loadDefinitionsByPrefixName } from '../../slicer';
 import DataStorage from '../../DataStorage';
 import logger from '../../lib/logger';
 
@@ -11,8 +23,8 @@ const log = logger('service:profile-definitions');
  * Get raw definition which is unparsed and override.
  */
 export const getRawDefinition = (req, res) => {
-    const { definitionId, headType } = req.params;
-    const series = req.query.series;
+    const { definitionId } = req.params;
+    const configPath = req.query.configPath;
     if (!definitionId) {
         res.status(ERR_BAD_REQUEST).send({
             err: 'Parameter "definitionId" is required.'
@@ -21,7 +33,7 @@ export const getRawDefinition = (req, res) => {
     }
 
     const filename = `${definitionId}.def.json`;
-    const configDir = `${DataStorage.configDir}/${headType}/${series}/${filename}`;
+    const configDir = `${DataStorage.configDir}/${configPath}/${filename}`;
     try {
         const readFileSync = fs.readFileSync(configDir);
         const parse = JSON.parse(readFileSync);
@@ -36,13 +48,14 @@ const isPublicProfile = (definitionId) => {
     return [
         DEFINITION_ACTIVE,
         DEFINITION_ACTIVE_FINAL,
-        DEFINITION_SNAPMAKER_EXTRUDER_0, DEFINITION_SNAPMAKER_EXTRUDER_1
+        DEFINITION_SNAPMAKER_EXTRUDER_0,
+        DEFINITION_SNAPMAKER_EXTRUDER_1,
     ].includes(definitionId);
 };
 
 export const getDefinition = (req, res) => {
     const { definitionId, headType } = req.params;
-    const series = req.query.series;
+    const configPath = req.query.configPath;
     if (!definitionId) {
         res.status(ERR_BAD_REQUEST).send({
             err: 'Parameter "definitionId" is required.'
@@ -52,33 +65,41 @@ export const getDefinition = (req, res) => {
 
     const definitionLoader = new DefinitionLoader();
 
+    let loadSuccess = false;
     if (isPublicProfile(definitionId)) {
-        definitionLoader.loadDefinition(headType, definitionId);
+        loadSuccess = definitionLoader.loadDefinition(headType, definitionId);
     } else {
-        definitionLoader.loadDefinition(headType, definitionId, series);
+        loadSuccess = definitionLoader.loadDefinition(headType, definitionId, configPath);
     }
-    res.send({ definition: definitionLoader.toObject() });
+
+    if (loadSuccess) {
+        res.send({ definition: definitionLoader.toObject() });
+    } else {
+        res.status(ERR_NOT_FOUND).send({ msg: 'Definition not found.' });
+    }
 };
 
 
 export const getDefinitionsByPrefixName = (req, res) => {
-    // const definitions = loadMaterialDefinitions();
-    const { headType, prefix, series } = req.params;
-    const definitions = loadDefinitionsByPrefixName(headType, prefix, series);
+    const { headType, prefix } = req.params;
+    const { configPath } = req.query;
+    const definitions = loadDefinitionsByPrefixName(headType, prefix, configPath);
     res.send({ definitions });
 };
 
 
 export const getDefaultDefinitions = (req, res) => {
-    const { series, headType } = req.params;
-    const definitions = loadAllSeriesDefinitions(true, headType, series);
+    const { headType } = req.params;
+    const { configPath } = req.query;
+    const definitions = loadAllSeriesDefinitions(true, headType, configPath);
     res.send({ definitions });
 };
 
 
 export const getConfigDefinitions = (req, res) => {
-    const { series, headType } = req.params;
-    const definitions = loadAllSeriesDefinitions(false, headType, series);
+    const { headType } = req.params;
+    const { configPath } = req.query;
+    const definitions = loadAllSeriesDefinitions(false, headType, configPath);
     res.send({ definitions });
 };
 
@@ -98,26 +119,22 @@ export const createDefinition = async (req, res) => {
 
     const definitionLoader = new DefinitionLoader();
     definitionLoader.fromObject(definition);
-    const series = isPublicProfile(definitionLoader.definitionId) ? '' : (req.body.series ?? '');
+    const configPath = isPublicProfile(definitionLoader.definitionId) ? headType : (req.body.configPath ?? '');
 
-    const filePath = path.join(`${DataStorage.configDir}/${headType}/${series}`, `${definitionLoader.definitionId}.def.json`);
-    const backupPath = path.join(`${DataStorage.activeConfigDir}/${headType}/${series}`, `${definitionLoader.definitionId}.def.json`);
+    const filePath = path.join(`${DataStorage.configDir}/${configPath}`, `${definitionLoader.definitionId}.def.json`);
+    const backupPath = path.join(`${DataStorage.activeConfigDir}/${configPath}`, `${definitionLoader.definitionId}.def.json`);
     const data = JSON.stringify(definitionLoader.toJSON(), null, 2);
     if (!fs.existsSync(backupPath)) {
         try {
-            await DataStorage.copyDirForInitSlicer({
-                srcDir: DataStorage.configDir,
-                dstDir: DataStorage.activeConfigDir,
-                overwriteTag: true,
-                inherit: true
-            });
+            await fs.copy(DataStorage.configDir, DataStorage.activeConfigDir);
         } catch (e) {
-            log.error('copyDirForInitSlicer', e.message);
+            log.error(e);
+            log.error(`Failed to backup config files: ${DataStorage.configDir} to ${DataStorage.activeConfigDir}`);
         }
     }
     const callback = () => {
         const loader = new DefinitionLoader();
-        loader.loadDefinition(headType, definitionLoader.definitionId, series);
+        loader.loadDefinition(headType, definitionLoader.definitionId, configPath);
         // res.send({ definition: loader.toObject() });
         fsWriteFile(backupPath, data, res, (err) => {
             if (err) {
@@ -129,6 +146,46 @@ export const createDefinition = async (req, res) => {
     };
     fsWriteFile(filePath, data, res, callback);
 };
+
+
+export const updateDefaultDefinition = (req, res) => {
+    const { definitionId, headType } = req.params;
+    const configPath = req.body.configPath;
+
+    const definitionLoader = new DefinitionLoader();
+    if (isPublicProfile(definitionId)) {
+        definitionLoader.loadDefaultDefinition(headType, definitionId);
+    } else {
+        definitionLoader.loadDefaultDefinition(headType, definitionId, configPath);
+    }
+    const { definition } = req.body;
+
+    // Remove for 3d printing profile
+    if (definition.settings) {
+        if (headType !== HEAD_PRINTING) {
+            definitionLoader.updateSettings(definition.settings);
+        } else {
+            definitionLoader.updateSettings(definition.settings, false);
+        }
+    }
+
+    let filePath = '';
+    if (isPublicProfile(definitionId)) {
+        filePath = path.join(`${DataStorage.defaultConfigDir}/${headType}`, `${definitionId}.def.json`);
+    } else {
+        filePath = path.join(`${DataStorage.defaultConfigDir}/${configPath}`, `${definitionId}.def.json`);
+    }
+    const data = JSON.stringify(definitionLoader.toJSON(), null, 2);
+    fs.writeFile(filePath, data, 'utf8', (err) => {
+        if (err) {
+            log.error(err);
+            res.status(ERR_INTERNAL_SERVER_ERROR).send({ err });
+        } else {
+            res.send({ status: 'ok', msg: 'Update success!' });
+        }
+    });
+};
+
 
 export const createTmpDefinition = (req, res) => {
     const { definition, filename } = req.body;
@@ -152,11 +209,11 @@ export const createTmpDefinition = (req, res) => {
 };
 
 export const removeDefinition = (req, res) => {
-    const { definitionId, headType } = req.params;
-    const series = req.body.series;
+    const { definitionId } = req.params;
+    const configPath = req.body.configPath;
 
-    const filePath = path.join(`${DataStorage.configDir}/${headType}/${series}`, `${definitionId}.def.json`);
-    const backupPath = path.join(`${DataStorage.activeConfigDir}/${headType}/${series}`, `${definitionId}.def.json`);
+    const filePath = path.join(`${DataStorage.configDir}/${configPath}`, `${definitionId}.def.json`);
+    const backupPath = path.join(`${DataStorage.activeConfigDir}/${configPath}`, `${definitionId}.def.json`);
     fs.unlink(filePath, (err) => {
         if (err) {
             log.error(err);
@@ -177,17 +234,16 @@ export const removeDefinition = (req, res) => {
 
 export const updateDefinition = async (req, res) => {
     const { definitionId, headType } = req.params;
-    const series = req.body.series;
+    const configPath = req.body.configPath;
 
     const definitionLoader = new DefinitionLoader();
     if (isPublicProfile(definitionId)) {
         definitionLoader.loadDefinition(headType, definitionId);
     } else {
-        definitionLoader.loadDefinition(headType, definitionId, series);
+        definitionLoader.loadDefinition(headType, definitionId, configPath);
     }
 
     const { definition } = req.body;
-
     if (definition.name) {
         definitionLoader.updateName(definition.name);
     }
@@ -206,6 +262,7 @@ export const updateDefinition = async (req, res) => {
         definitionLoader.updateI18nName(definition.i18nName);
     }
 
+    // Remove for 3d printing profile
     if (definition.settings) {
         definitionLoader.updateSettings(definition.settings);
     }
@@ -216,21 +273,18 @@ export const updateDefinition = async (req, res) => {
         filePath = path.join(`${DataStorage.configDir}/${headType}`, `${definitionId}.def.json`);
         activeRecoverPath = path.join(`${DataStorage.activeConfigDir}/${headType}`, `${definitionId}.def.json`);
     } else {
-        filePath = path.join(`${DataStorage.configDir}/${headType}/${series}`, `${definitionId}.def.json`);
-        activeRecoverPath = path.join(`${DataStorage.activeConfigDir}/${headType}/${series}`, `${definitionId}.def.json`);
+        filePath = path.join(`${DataStorage.configDir}/${configPath}`, `${definitionId}.def.json`);
+        activeRecoverPath = path.join(`${DataStorage.activeConfigDir}/${configPath}`, `${definitionId}.def.json`);
     }
     if (!fs.existsSync(DataStorage.activeConfigDir)) {
         try {
-            await DataStorage.copyDirForInitSlicer({
-                srcDir: DataStorage.configDir,
-                dstDir: DataStorage.activeConfigDir,
-                overwriteTag: true,
-                inherit: true
-            });
+            await fs.copy(DataStorage.configDir, DataStorage.activeConfigDir);
         } catch (e) {
             log.error(e);
+            log.error(`Failed to backup config files: ${DataStorage.configDir} to ${DataStorage.activeConfigDir}`);
         }
     }
+
     const data = JSON.stringify(definitionLoader.toJSON(), null, 2);
     const callback = () => {
         fsWriteFile(activeRecoverPath, data, res, (err) => {
@@ -253,7 +307,7 @@ const isSourceFormDefault = (obj) => {
 
 export const uploadDefinition = (req, res) => {
     const { headType } = req.params;
-    const { definitionId, uploadName, series } = req.body;
+    const { definitionId, uploadName, configPath } = req.body;
     const readFileSync = fs.readFileSync(`${DataStorage.tmpDir}/${uploadName}`, 'utf-8');
     let obj;
     try {
@@ -280,8 +334,8 @@ export const uploadDefinition = (req, res) => {
     const definitionLoader = new DefinitionLoader();
     try {
         definitionLoader.loadJSON(headType, definitionId, obj);
-        const filePath = path.join(`${DataStorage.configDir}/${headType}/${series}`, `${definitionId}.def.json`);
-        const backupPath = path.join(`${DataStorage.activeConfigDir}/${headType}/${series}`, `${definitionId}.def.json`);
+        const filePath = path.join(`${DataStorage.configDir}/${configPath}`, `${definitionId}.def.json`);
+        const backupPath = path.join(`${DataStorage.activeConfigDir}/${configPath}`, `${definitionId}.def.json`);
         const data = JSON.stringify(definitionLoader.toJSON(), null, 2);
         const callback = () => {
             fsWriteFile(backupPath, data, res, (err) => {
@@ -295,5 +349,44 @@ export const uploadDefinition = (req, res) => {
         fsWriteFile(filePath, data, res, callback);
     } catch (e) {
         res.status(ERR_INTERNAL_SERVER_ERROR).send({ err: e });
+    }
+};
+
+export const getPresetParameterKeys = (req, res) => {
+    const data = getParameterKeys();
+    res.send(data);
+};
+
+
+export const getParameterDoc = (req, res) => {
+    try {
+        const lang = req.query.lang;
+        const { category, key } = req.params;
+
+        const langDir = lang.toUpperCase() === 'ZH-CN' ? 'CN' : lang.toUpperCase();
+
+        const fileRelativePath = `${langDir}/${category}/${key}.md`;
+        const filePath = `${DataStorage.getParameterDocumentDir()}/${fileRelativePath}`;
+
+        let content;
+        if (fs.existsSync(filePath)) {
+            content = fs.readFileSync(`${filePath}`, 'utf-8');
+        } else if (lang !== 'en') {
+            log.info(`Request: "${fileRelativePath}"\nNo documentation was found for the user's language ${lang}. An English version was given.`);
+
+            const filePathEN = `${DataStorage.getParameterDocumentDir()}/EN/${category}/${key}.md`;
+            content = fs.readFileSync(filePathEN, 'utf-8');
+        }
+
+        res.status(200).send({
+            content: content,
+            imagePath: `${DataStorage.getParameterDocumentDir()}/`
+        });
+    } catch (e) {
+        log.error(e);
+
+        res.status(500).send({
+            msg: 'No such path',
+        });
     }
 };

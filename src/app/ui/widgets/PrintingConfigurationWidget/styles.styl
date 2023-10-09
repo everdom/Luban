@@ -1,0 +1,181 @@
+@import "../../../styles/variables.styl"
+@import "../../../styles/global-var.styl"
+
+.widget-container {
+    width: 360px; // fixed widget width
+    background-color: $white-color;
+    padding: 0 16px;
+    border-radius: 8px; // $border-radius;
+    box-shadow: 0 0 12px -8px #2a2c2e;
+    overflow-x: hidden;
+}
+
+.manager-body {
+    text-align: left;
+
+    .manager-type-wrapper {
+        padding: 0 20px
+        border-bottom: 1px #c8c8c8 solid
+        text-align: left
+
+        .manager-type {
+            display: inline-block
+            line-height: 25px
+            padding-bottom: 9px
+            height: 36px;
+            font-size: 18px;
+            font-weight: 500;
+
+            &.selected {
+                color: #28A7E1;
+                border-bottom: 2px #28A7E1 solid;
+            }
+        }
+    }
+
+    .manager-content {
+        height: 530px
+        // padding: 20px;
+        display: flex;
+    }
+}
+
+.manager-icon {
+    width: 32px;
+    height: 32px;
+    background: #FFFFFF;
+    border-radius: 4px;
+    border: 1px solid #C8C8C8;
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 11px;
+    background: url("../../../resources/images/18x18/printing-manager_18x18@2x.png") no-repeat center / 18px 18px;
+    margin-bottom: 10px;
+}
+
+.preset-recommended {
+    .unselected, .selected {
+        > a {
+            display: block
+            width: 76px
+            border-radius: $border-radius
+            border: 1px solid #B9BCBF;
+
+            > i {
+                display: block
+                border-radius: $border-radius
+                width: 74px
+                height: 74px
+            }
+        }
+    }
+
+    .selected {
+        > a {
+            border: 1px solid #1890FF;
+        }
+
+        > span {
+            color: #1890FF;
+        }
+    }
+
+    &__icon {
+        height: 76px
+        width: 76px
+        position: relative
+
+        .preset-hover {
+            position: absolute
+            right: -9999px
+        }
+
+        &:hover {
+            .preset-hover {
+                right: 0
+            }
+        }
+    }
+
+    &__icon-engineering {
+        background: url("./images/preset-engineering.svg") no-repeat 0 0
+        background-size: 100%
+    }
+
+    &__icon-fine {
+        background: url("./images/preset-fine.svg") no-repeat 0 0
+        background-size: 100%
+    }
+
+    &__icon-quik {
+        background: url("./images/preset-quik.svg") no-repeat 0 0
+        background-size: 100%
+    }
+
+    &__icon-universal {
+        background: url("./images/preset-universal.svg") no-repeat 0 0
+        background-size: 100%
+    }
+}
+
+.preset-customized {
+    min-height: 60px;
+    max-height: 154px;
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    .selected {
+        background-color: $blue-6;
+    }
+
+    .preset-item:hover {
+        .preset-hover {
+            display: inline-block;
+        }
+    }
+
+    .preset-hover {
+        display: none;
+    }
+}
+
+.material-select {
+    width: 86%;
+    display: inline-block;
+    vertical-align: middle;
+    margin-bottom: 10px;
+}
+
+table.config-details-table {
+    color: $desc-text-color;
+    margin-left: 15.5px;
+    font-size: 12px;
+
+    td {
+        height: 28px;
+        line-height: 13px;
+    }
+
+    tbody {
+        & > tr {
+            & > td:first-child {
+                width: 200px;
+            }
+
+            & > td {
+                & > div {
+                    width: 14px;
+                    height: 14px;
+                }
+            }
+        }
+    }
+
+    .checked {
+        background: url("../../../resources/images/56x56/btn_checked@56x56.png") no-repeat center / 14px 14px;
+    }
+
+    .unchecked {
+        background: url("../../../resources/images/56x56/btn_unchecked@56x56.png") no-repeat center / 14px 14px;
+    }
+}

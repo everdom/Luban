@@ -23,7 +23,7 @@
     }
     :global(.ant-modal-body) {
         padding: $px-grade-12 $px-grade-12 $px-grade-20;
-        max-height 600px !important
+        max-height 700px !important
         overflow-y auto !important
     }
     :global(.ant-modal-footer) {
@@ -37,6 +37,22 @@
             :global(.ant-modal-body) {
                 padding-top: $px-grade-20;
             }
+        }
+    }
+}
+
+:global(.model-lg-profile-manager) {
+    width: calc(100vw - 80px) !important;
+    max-width: calc(100vw - 80px) !important;
+    height: calc(100vh - 80px) !important;
+    max-height: calc(100vh - 80px) !important;
+    padding-bottom: 0px !important;
+    :global(.ant-modal-content) {
+        height: 100%
+        max-height: 100% !important;
+        :global(.ant-modal-body) {
+            padding: 0px;
+            max-height: calc(100vh - 132px) !important;
         }
     }
 }

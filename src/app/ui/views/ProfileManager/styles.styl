@@ -1,54 +1,66 @@
+@import '../../../styles/global-var.styl';
 @import "../../../styles/variables.styl"
+
 .manager-body {
     text-align: left;
+
     .manager-content {
-        height: 536px
+        height: calc(100vh - 132px);
+
         .manager-name {
-            display:flex
+            display: flex
             flex-direction: column
-            width: 260px
+            width: 262px
             height: 100%
-            margin-right: 16px
+            // margin-right: 16px
             vertical-align: top
+
             .manager-name-wrapper {
                 list-style: none
+                width: 262px;
                 background: #FFFFFF;
                 padding: 0;
-                margin: 0 0 8px;
+                margin: 0;
                 overflow-y: auto;
                 flex: 1
                 vertical-align: top
+
                 .manager-btn {
-                    display: inline-block
+                    display: flex;
                     height: 32px
                     line-height: 32px;
                     width: 100%;
                     text-align: left;
+
                     &.selected {
-                        background: #E6F2FD;
+                        background-color: $background-color-selected;
                     }
+
                     .manager-btn-unfold {
                         width: 32px;
                         height: 32px;
                         display: inline-block;
                         vertical-align: middle;
+
                         .manager-btn-unfold-bg {
-                            outline: none;
-                            background: url("../../../resources/images/cnc-laser/ic_right arrow_18x18.png") no-repeat center/18px 18px
+                            outline: 0;
+                            background: url("../../../resources/images/cnc-laser/ic_right arrow_18x18.png") no-repeat center / 18px 18px
                             height: 18px;
                             margin: 7px;
                             width: 18px;
                             display: inline-block;
+
                             &.unfold {
-                                outline: none;
+                                outline: 0;
                                 background-image: url("../../../resources/images/cnc-laser/ic_drop arrow_18x18.png")
                             }
                         }
                     }
-                    input{
+
+                    input {
                         float: none;
-                        outline:none;
-                        border:none;
+                        outline: 0;
+                        border: 0;
                         width: 215px;
                         height: 24px;
                         background: #FFFFFF;
@@ -56,17 +68,20 @@
                     }
                 }
             }
+
             .manager-file {
                 width: 48%;
                 vertical-align: middle;
                 background-color: white;
                 padding: 4px;
                 border: 1px solid #B9BCBF;
+
                 &:hover {
                     color: #272829;
                     background #eeeff0 !important;
                 }
-                .action-title{
+
+                .action-title {
                     vertical-align: middle;
                     display: inline-block;
                     line-height: 16px;
@@ -79,8 +94,10 @@
     .manager-settings {
         padding: 0 20px;
         background: #F6F7F8;
+
         .manager-settings-btn {
             padding: 9px 0;
+
             a {
                 box-sizing: content-box;
                 height: 24px;
@@ -88,9 +105,11 @@
                 padding: 5px 30px
             }
         }
+
         .manager-settings-operate {
             float: left;
         }
+
         .manager-settings-save {
             float: right;
         }
@@ -99,27 +118,343 @@
 }
 
 .manager-grouplist {
-    width: 220px
+    width: 208px
+    border-right: 1px solid #EEEFF0;
+    padding: 16px 0;
     // height: 100%
     height: 98%
-    margin-right: 16px;
+    // margin-right: 16px;
     // padding: 1px;
     text-align: left;
-    box-sizing content-box;
-    .item{
+    box-sizing: content-box;
+
+    .item {
         display: block;
         width: 100%;
         line-height: 32px;
-        padding: 0px 10px;
+        padding: 0 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
+
     .selected {
-        background: #E6F2FD;
+        background-color: $background-color-selected;
+        border-radius: 4px;
     }
 }
+
+div.manager-detail-and-docs {
+    max-width: calc(100% - 208px);
+    width: calc(100% - 224px);
+    overflow-x: auto;
+    padding: 16px 0 16px 16px;
+}
+
 .manager-details {
-    width: 420px
+    // width: 100%;
+    // max-width: 490px;
+    min-width: 408px;
     height: 100%
     overflow-y: auto;
-    padding: 0 16px;
-    text-align: left
+    margin: 0 24px 0 0;
+    text-align: left;
+    position: relative;
+}
+
+.settings-select-wrapper {
+    max-width: 384px;
+    max-height: 256px;
+    padding-right: 4px;
+    overflow-y: scroll;
+    flex-flow: wrap;
+    word-wrap: break-word;
+
+    &_scroll {
+        padding-right: 4px !important;
+        overflow-y: scroll !important;
+    }
+
+    .settings-item {
+        &:not(:nth-child(4n)) {
+            margin-right: 16px;
+        }
+
+        .settings-select {
+            width: 76px;
+            height: 76px;
+            border-radius: 8px;
+            white-space: nowrap;
+            border: 1px solid #B9BCBF;
+            overflow: hidden;
+
+            .img {
+                width: 100%;
+                height: 100%;
+                background-size: contain;
+
+                &:hover {
+                    transform: scale(1.05);
+                }
+
+                &_adhesion_type_brim {
+                    background-image: url("./images/adhesion_type_brim.jpg")
+                }
+
+                &_adhesion_type_none {
+                    background-image: url("./images/adhesion_type_none.jpg")
+                }
+
+                &_adhesion_type_raft {
+                    background-image: url("./images/adhesion_type_raft.jpg")
+                }
+
+                &_adhesion_type_skirt {
+                    background-image: url("./images/adhesion_type_skirt.jpg")
+                }
+
+                &_infill_pattern_concentric {
+                    background-image: url("./images/infill_pattern_concentric.jpg")
+                }
+
+                &_infill_pattern_cross_3d {
+                    background-image: url("./images/infill_pattern_cross_3d.jpg")
+                }
+
+                &_infill_pattern_cross {
+                    background-image: url("./images/infill_pattern_cross.jpg")
+                }
+
+                &_infill_pattern_cubicsubdivn {
+                    background-image: url("./images/infill_pattern_cubicsubdivn.jpg")
+                }
+
+                &_infill_pattern_cubic {
+                    background-image: url("./images/infill_pattern_cubic.jpg")
+                }
+
+                &_infill_pattern_grid {
+                    background-image: url("./images/infill_pattern_grid.jpg")
+                }
+
+                &_infill_pattern_gyroid {
+                    background-image: url("./images/infill_pattern_gyroid.jpg")
+                }
+
+                &_infill_pattern_lines {
+                    background-image: url("./images/infill_pattern_lines.jpg")
+                }
+
+                &_infill_pattern_quarter_cubic {
+                    background-image: url("./images/infill_pattern_quarter_cubic.jpg")
+                }
+
+                &_infill_pattern_tetrahedral {
+                    background-image: url("./images/infill_pattern_tetrahedral.jpg")
+                }
+
+                &_infill_pattern_triangles {
+                    background-image: url("./images/infill_pattern_triangles.jpg")
+                }
+
+                &_infill_pattern_trihexagon {
+                    background-image: url("./images/infill_pattern_trihexagon.jpg")
+                }
+
+                &_infill_pattern_zigzag {
+                    background-image: url("./images/infill_pattern_zigzag.jpg")
+                }
+
+                &_model_structure_type_normal {
+                    background-image: url("./images/model_structure_type_normal.jpg")
+                }
+
+                &_model_structure_type_vase {
+                    background-image: url("./images/model_structure_type_vase.jpg")
+                }
+
+                &_support_pattern_concentric {
+                    background-image: url("./images/support_pattern_concentric.jpg")
+                }
+
+                &_support_pattern_cross {
+                    background-image: url("./images/support_pattern_cross.jpg")
+                }
+
+                &_support_pattern_grid {
+                    background-image: url("./images/support_pattern_grid.jpg")
+                }
+
+                &_support_pattern_gyroid {
+                    background-image: url("./images/support_pattern_gyroid.jpg")
+                }
+
+                &_support_pattern_lines {
+                    background-image: url("./images/support_pattern_lines.jpg")
+                }
+
+                &_support_pattern_triangles {
+                    background-image: url("./images/support_pattern_triangles.jpg")
+                }
+
+                &_support_pattern_zigzag {
+                    background-image: url("./images/support_pattern_zigzag.jpg")
+                }
+
+                &_support_roof_pattern_concentric {
+                    background-image: url("./images/support_roof_pattern_concentric.jpg")
+                }
+
+                &_support_roof_pattern_grid {
+                    background-image: url("./images/support_roof_pattern_grid.jpg")
+                }
+
+                &_support_roof_pattern_lines {
+                    background-image: url("./images/support_roof_pattern_lines.jpg")
+                }
+
+                &_support_roof_pattern_triangles {
+                    background-image: url("./images/support_roof_pattern_triangles.jpg")
+                }
+
+                &_support_roof_pattern_zigzag {
+                    background-image: url("./images/support_roof_pattern_zigzag.jpg")
+                }
+
+                &_support_type_buildplate {
+                    background-image: url("./images/support_type_buildplate.jpg")
+                }
+
+                &_support_type_everywhere {
+                    background-image: url("./images/support_type_everywhere.jpg")
+                }
+
+                &_z_seam_type_back {
+                    background-image: url("./images/z_seam_type_back.jpg")
+                }
+
+                &_z_seam_type_random {
+                    background-image: url("./images/z_seam_type_random.jpg")
+                }
+
+                &_z_seam_type_sharpest_corner {
+                    background-image: url("./images/z_seam_type_sharpest_corner.jpg")
+                }
+
+                &_z_seam_type_shortest {
+                    background-image: url("./images/z_seam_type_shortest.jpg")
+                }
+
+                &_top_bottom_pattern_lines {
+                    background-image: url("./images/support_roof_pattern_lines.jpg")
+                }
+
+                &_top_bottom_pattern_concentric {
+                    background-image: url("./images/support_pattern_concentric.jpg")
+                }
+
+                &_top_bottom_pattern_zigzag {
+                    background-image: url("./images/support_pattern_zigzag.jpg")
+                }
+
+                &_top_bottom_pattern_0_lines {
+                    background-image: url("./images/support_roof_pattern_lines.jpg")
+                }
+
+                &_top_bottom_pattern_0_concentric {
+                    background-image: url("./images/support_pattern_concentric.jpg")
+                }
+
+                &_top_bottom_pattern_0_zigzag {
+                    background-image: url("./images/support_pattern_zigzag.jpg")
+                }
+            }
+        }
+
+        &_selected {
+            span {
+                color: #1890FF;
+            }
+
+            .settings-select {
+                border-color: #1890FF;
+            }
+        }
+    }
+}
+
+.manager-params-docs {
+    min-width: 265px;
+
+    img {
+        width: 100% !important;
+        height: auto;
+    }
+
+    &-content {
+        color: #545659;
+
+        h1 {
+            font-size: 16px;
+            color: #000000;
+            font-weight: 700;
+            line-height: 18.75px;
+            margin-bottom: 16px;
+        }
+
+        h2, h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #000000;
+        }
+    }
+}
+
+.open-params-profile {
+    .profile-params-show-icon {
+        visibility: hidden;
+    }
+
+    &:hover {
+        .profile-params-show-icon {
+            visibility: visible;
+        }
+    }
+}
+
+.close-params-profile {
+    .profile-params-show-icon {
+        visibility: visible;
+    }
+}
+
+.hidden-docs {
+    width: 1px;
+    min-width: 1px !important;
+}
+
+.manager-list {
+    height: calc(100% - 56px);
+    overflow: auto;
+}
+
+.manager-action {
+    visibility: hidden;
+}
+
+.profile-li, .manager-btn {
+    &.selected:hover {
+        & > .manager-action {
+            background: #f00;
+            visibility: visible;
+        }
+    }
+}
+
+.config-value-box-wrapper {
+    width: calc(100% - 294px);
+}
+
+.disable-li {
+    pointer-events: none;
 }

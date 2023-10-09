@@ -1,5 +1,6 @@
 import noop from 'lodash/noop';
 import io from 'socket.io-client';
+import { v4 as uuid } from 'uuid';
 
 class SocketController {
     socket = null;
@@ -25,7 +26,6 @@ class SocketController {
 
         this.socket = io.connect('', {
             query: `token=${token}`,
-            transports: ['websocket']
         });
 
         this.socket.on('startup', () => {
@@ -42,7 +42,9 @@ class SocketController {
     }
 
     emit(event, ...args) {
-        this.socket && this.socket.emit(event, ...args);
+        setTimeout(() => {
+            this.socket && this.socket.emit(event, ...args);
+        }, 200);
     }
 
     on(eventName, callback) {
@@ -53,7 +55,7 @@ class SocketController {
         if (callbacks) {
             callbacks.push(callback);
         }
-        this.socket && this.socket.on(eventName, (...args) => {
+        this.socket.on(eventName, (...args) => {
             for (const callback1 of callbacks) {
                 callback1(...args);
             }
@@ -61,10 +63,32 @@ class SocketController {
     }
 
     once(eventName, callback) {
-        this.socket && this.socket.once(eventName, (...args) => {
+        this.socket.once(eventName, (...args) => {
             callback(...args);
         });
+
         return this;
+    }
+
+    channel(topic, params, onMessage) {
+        return new Promise((resolve, reject) => {
+            const actionid = uuid();
+            const listener = (_actionid, _STATUS_, result) => {
+                if (actionid === _actionid) {
+                    if (_STATUS_ === 'next') {
+                        onMessage && onMessage(result);
+                    } else if (_STATUS_ === 'complete') {
+                        resolve();
+                        this.socket.off(topic, listener);
+                    } else if (_STATUS_ === 'error') {
+                        reject();
+                        this.socket.off(topic, listener);
+                    }
+                }
+            };
+            this.socket.on(topic, listener);
+            this.emit(topic, actionid, params);
+        });
     }
 }
 

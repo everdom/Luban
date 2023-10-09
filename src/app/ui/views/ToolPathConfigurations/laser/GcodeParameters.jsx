@@ -18,7 +18,11 @@ class GcodeParameters extends PureComponent {
         toolDefinitions: PropTypes.array.isRequired,
         setCurrentToolDefinition: PropTypes.func.isRequired,
         isModifiedDefinition: PropTypes.bool.isRequired,
-        setCurrentValueAsProfile: PropTypes.func.isRequired
+        setCurrentValueAsProfile: PropTypes.func.isRequired,
+        isModel: PropTypes.bool,
+        zOffsetEnabled: PropTypes.bool,
+        halfDiodeModeEnabled: PropTypes.bool,
+        auxiliaryAirPumpEnabled: PropTypes.bool,
     };
 
     state = {
@@ -29,6 +33,11 @@ class GcodeParameters extends PureComponent {
 
     render() {
         const { toolPath, activeToolDefinition } = this.props;
+        const {
+            zOffsetEnabled = true,
+            halfDiodeModeEnabled = false,
+            auxiliaryAirPumpEnabled = false,
+        } = this.props;
 
         const { type, gcodeConfig } = toolPath;
 
@@ -54,12 +63,12 @@ class GcodeParameters extends PureComponent {
         const multiPasses = allDefinition.multiPasses.default_value;
         const fixedPowerEnabled = allDefinition.fixedPowerEnabled.default_value;
 
-        // Session Method
+        // section Method
         const laserDefinitionMethod = {
             'pathType': allDefinition.pathType
         };
 
-        // Session Fill
+        // section Fill
         const laserDefinitionFillKeys = [];
         const laserDefinitionFill = {};
         if (pathType === 'fill') {
@@ -70,7 +79,7 @@ class GcodeParameters extends PureComponent {
                     laserDefinitionFillKeys.push('direction');
                 }
             } else if (isImage) {
-                if (movementMode === 'greyscale-line') {
+                if (movementMode !== 'greyscale-dot') {
                     laserDefinitionFillKeys.push('direction');
                 }
                 laserDefinitionFillKeys.push('fillInterval');
@@ -95,9 +104,9 @@ class GcodeParameters extends PureComponent {
             }
         });
 
-        // Session Speed
+        // section Speed
         const laserDefinitionSpeedKeys = ['jogSpeed'];
-        if (pathType === 'fill' && movementMode === 'greyscale-line') {
+        if (pathType === 'fill' && movementMode !== 'greyscale-dot') {
             laserDefinitionSpeedKeys.push('workSpeed');
         } else if (pathType === 'path') {
             laserDefinitionSpeedKeys.push('workSpeed');
@@ -112,12 +121,15 @@ class GcodeParameters extends PureComponent {
             }
         });
 
-        // Session Pass
+        // section Pass
         const laserDefinitionRepetitionKeys = [];
         const laserDefinitionRepetition = {};
         if (pathType === 'path') {
+            if (zOffsetEnabled) {
+                laserDefinitionRepetitionKeys.push('initialHeightOffset');
+            }
             laserDefinitionRepetitionKeys.push('multiPasses');
-            if (multiPasses > 1) {
+            if (zOffsetEnabled && multiPasses > 1) {
                 laserDefinitionRepetitionKeys.push('multiPassDepth');
             }
             laserDefinitionRepetitionKeys.forEach((key) => {
@@ -127,12 +139,29 @@ class GcodeParameters extends PureComponent {
             });
         }
 
-        // Session Power
-        const laserDefinitionPowerKeys = ['fixedPower'];
+        // section Power
+        const laserDefinitionPowerKeys = ['fixedPower', 'constantPowerMode'];
+        if (halfDiodeModeEnabled) {
+            laserDefinitionPowerKeys.push('halfDiodeMode');
+        }
+
+        // if (pathType === 'fill' && movementMode === 'greyscale-variable-line') {
+        //     laserDefinitionPowerKeys.push('fixedMinPower');
+        // laserDefinitionPowerKeys.push('powerLevelDivisions');
+        // }
         const laserDefinitionPower = {};
         laserDefinitionPowerKeys.forEach((key) => {
             if (allDefinition[key]) {
                 laserDefinitionPower[key] = allDefinition[key];
+            }
+        });
+
+        // section Auxiliary Gas
+        const laserDefinitionAuxiliaryGasKeys = ['auxiliaryAirPump'];
+        const laserDefinitionAuxiliary = {};
+        laserDefinitionAuxiliaryGasKeys.forEach((key) => {
+            if (allDefinition[key]) {
+                laserDefinitionAuxiliary[key] = allDefinition[key];
             }
         });
 
@@ -153,6 +182,7 @@ class GcodeParameters extends PureComponent {
                         setCurrentToolDefinition={this.props.setCurrentToolDefinition}
                         isModifiedDefinition={this.props.isModifiedDefinition}
                         setCurrentValueAsProfile={this.props.setCurrentValueAsProfile}
+                        isModel={this.props.isModel}
                     />
                     <ToolParameters
                         settings={laserDefinitionMethod}
@@ -236,6 +266,27 @@ class GcodeParameters extends PureComponent {
                         />
                     </div>
                 )}
+                {
+                    auxiliaryAirPumpEnabled && (
+                        <div>
+                            <div className="border-bottom-normal padding-bottom-4 margin-vertical-16">
+                                <SvgIcon
+                                    name="TitleSetting"
+                                    type={['static']}
+                                    size={24}
+                                />
+                                <span>{i18n._('key-Laser/ToolpathParameters-Auxiliary Gas')}</span>
+                            </div>
+                            <ToolParameters
+                                settings={laserDefinitionAuxiliary}
+                                updateToolConfig={this.props.updateToolConfig}
+                                updateGcodeConfig={this.props.updateGcodeConfig}
+                                toolPath={this.props.toolPath}
+                                styleSize="large"
+                            />
+                        </div>
+                    )
+                }
             </React.Fragment>
         );
     }

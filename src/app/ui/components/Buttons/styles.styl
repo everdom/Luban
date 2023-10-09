@@ -1,7 +1,6 @@
 @import "../../../styles/global-var";
 
 button.button-lb {
-    font-family: 'Roboto Regular';
     font-weight: normal;
     border-radius: $px-grade-4;
     padding-left: $px-grade-4;
@@ -10,6 +9,10 @@ button.button-lb {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .width-with-suffix-icon {
+        width: calc(100% - 29px);
+        margin-right: 45px;
     }
     .suffix-container {
         top: $px-grade-0;
@@ -159,6 +162,10 @@ button.button-lb {
 .button-lb.level-one {
     height: $px-grade-20;
     box-shadow 0px 8px 20px -6px #2C262550;
+    .inside-button > div{
+        line-height: $px-grade-15;
+        height: $px-grade-15;
+    }
 }
 
 .button-lb.level-two, .button-lb.level-three {

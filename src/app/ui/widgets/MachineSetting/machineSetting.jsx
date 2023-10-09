@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import { Button } from 'antd';
 import PropTypes from 'prop-types';
-import { useDispatch, useSelector } from 'react-redux';
-import { Button } from 'react-bootstrap';
-import i18n from '../../../lib/i18n';
-import styles from './styles.styl';
-import { actions as machineActions } from '../../../flux/machine';
+import React, { useEffect, useState } from 'react';
+import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 
-// component
+import { actions as machineActions } from '../../../flux/machine';
+import i18n from '../../../lib/i18n';
 import Select from '../../components/Select';
+import styles from './styles.styl';
 
 const MachineSetting = (props) => {
     const dispatch = useDispatch();
     const machine = useSelector(state => state?.machine);
     const workspace = useSelector(state => state?.workspace);
-    const { isConnected, connectionType, workflowState } = machine;
+
+    const { connectionType, isConnected, workflowState } = useSelector(state => state.workspace, shallowEqual);
+
     const { headType, series } = workspace;
     const [enclosureDoorDetection, setEnclosureDoorDetection] = useState(machine?.enclosureDoorDetection);
     const [zAxisModule, setZAxisModule] = useState(machine?.zAxisModule);
@@ -60,9 +61,9 @@ const MachineSetting = (props) => {
         }
     ];
     return (
-        <div className={styles.machineSettingContainer}>
-            <div className={styles.doorDetection}>
-                <div className={styles.selectLabel}>
+        <div className={styles['machine-setting-container']}>
+            <div>
+                <div>
                     {i18n._('key-Workspace/MachineSetting-Door Detection')}
                 </div>
                 <Select
@@ -74,8 +75,8 @@ const MachineSetting = (props) => {
                     onChange={e => setEnclosureDoorDetection(e.value)}
                 />
             </div>
-            <div className={styles.zAxis}>
-                <div className={styles.selectLabel}>
+            <div className={styles['z-axis']}>
+                <div>
                     {i18n._('key-Workspace/MachineSetting-Z-Axis Extension Module')}
                 </div>
                 <Select
@@ -88,9 +89,8 @@ const MachineSetting = (props) => {
                 />
             </div>
             <Button
-                type="primary"
+                className={styles['confirm-btn']}
                 onClick={onSave}
-                className={styles.confirmBtn}
             >
                 {i18n._('key-Workspace/MachineSetting-Confirm')}
             </Button>
@@ -99,7 +99,7 @@ const MachineSetting = (props) => {
 };
 
 MachineSetting.propTypes = {
-    widgetActions: PropTypes.object.isRequired
+    widgetActions: PropTypes.object.isRequired,
 };
 
 export default MachineSetting;

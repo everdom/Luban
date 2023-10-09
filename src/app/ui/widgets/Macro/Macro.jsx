@@ -8,27 +8,29 @@ import SvgIcon from '../../components/SvgIcon';
 import {
     MODAL_RUN_MACRO,
     MODAL_EDIT_MACRO,
-    WORKFLOW_STATE_IDLE
 } from '../../../constants';
 import api from '../../../api';
 // import { Button } from '../../components/Buttons';
 // import Space from '../../components/Space';
 import i18n from '../../../lib/i18n';
-import { actions as machineActions } from '../../../flux/machine';
+import { actions as workspaceActions } from '../../../flux/workspace';
 
 import styles from './index.styl';
 
 const STATUS_IDLE = 'idle';
 
-function Macro({ updateModal, openModal, macros }) {
-    const { workflowState, workflowStatus, isConnected } = useSelector(state => state.machine);
+const Macro = (({ updateModal, openModal, macros }) => {
+    const { isConnected } = useSelector(state => state.workspace);
+
+    const { workflowStatus } = useSelector(state => state.workspace);
+
     const [macrosState, setMacrosState] = useState([]);
     const dispatch = useDispatch();
 
     const actions = {
         executeGcode: (gcode) => {
             gcode = gcode.trim();
-            dispatch(machineActions.executeGcode(gcode));
+            dispatch(workspaceActions.executeGcode(gcode));
         },
         runMacro: (macro) => {
             api.macros.read(macro.id)
@@ -58,7 +60,7 @@ function Macro({ updateModal, openModal, macros }) {
                 return false;
             }
 
-            if (workflowState !== WORKFLOW_STATE_IDLE && workflowStatus !== STATUS_IDLE) {
+            if (workflowStatus !== STATUS_IDLE) {
                 return false;
             }
             return true;
@@ -70,7 +72,6 @@ function Macro({ updateModal, openModal, macros }) {
             setMacrosState(macros);
         }
     }, [macros]);
-
     const canClick = actions.canClick();
     return (
         <div className="padding-horizontal-16 height-176 padding-vertical-4
@@ -118,7 +119,7 @@ function Macro({ updateModal, openModal, macros }) {
             ))}
         </div>
     );
-}
+});
 Macro.propTypes = {
     macros: PropTypes.array,
     updateModal: PropTypes.func.isRequired,

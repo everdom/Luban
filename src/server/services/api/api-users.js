@@ -89,6 +89,7 @@ export const signin = (req, res) => {
             enabled: false, // session is disabled
             token: accessToken,
             sceneJson,
+            userId: config.get('gaUserId'),
             name: user.name // empty name
         });
         return;
@@ -117,6 +118,7 @@ export const signin = (req, res) => {
             enabled: true, // session is enabled
             token: accessToken, // new token
             sceneJson,
+            userId: config.get('gaUserId'),
             name: user.name
         });
         return;
@@ -329,7 +331,23 @@ export const __delete = (req, res) => {
 
 export const resetConfig = async (req, res) => {
     try {
-        DataStorage.clearAll();
+        await DataStorage.clearAll();
+        await DataStorage.init(true);
+        res.status(200).send({
+            msg: 'Reset user config successfully'
+        });
+    } catch (e) {
+        log.error(e);
+        res.status(500).send({
+            msg: 'Failed to reset user config'
+        });
+    }
+};
+
+export const resetPrintConfig = async (req, res) => {
+    try {
+        // Yes actually we reset all configurations
+        await DataStorage.clearAll();
         await DataStorage.init(true);
         res.status(200).send({
             msg: 'Reset user config successfully'

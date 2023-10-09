@@ -4,40 +4,16 @@ Snapmaker Luban
 [![Build Status](https://github.com/Snapmaker/Luban/workflows/Build%20on%20Release%20created/badge.svg)](https://github.com/Snapmaker/Luban/actions)
 
 Snapmaker Luban is an easy-to-use 3-in-1 software tailor-made for Snapmaker machines.
-You can customize the printer settings and control the machine using the command panel in Luban anytime with ease.
+You can customize the printer settings and control the machine in Luban anytime with ease.
 The software also provides G-code generation support for 3D models, laser engraving / cutting, and CNC milling.
 
 Our goal is to provide a multi-functional 3D software, while making it as accessible and customizable as possible for new users / beginners.
 
-The software is inspired by [cncjs](https://github.com/cncjs/cncjs) by cheton, we also use [CuraEngine](https://github.com/Ultimaker/CuraEngine) for 3D slicing.
+The software is inspired by [cncjs](https://github.com/cncjs/cncjs) by cheton.
+We use [LunarSlicer](https://github.com/Snapmaker/LunarSlicer) for 3D slicing.
 
-## Features
+![Software Screenshot](https://user-images.githubusercontent.com/3749551/219274513-0f0d1e56-2e0a-4c9b-ad8b-7b5801a00cde.jpg)
 
-- Desktop applications for macOS, Linux and Windows
-- Supported controller: Marlin or Marlin-based controllers
-- 3D printing G-code generator
-    - Multiple models
-    - Manipulate model (Position / Rotate / Duplicate / Lay Flat)
-    - Model export and G-code export
-    - Built-in and custom configurations for slicing
-- Laser G-code generator
-    - Multiple models
-    - Manipulate model (Position / Rotate / Duplicate)
-    - Model export and G-code export
-    - Featured modes: B&W, Greyscale, Vector, Text
-- CNC G-code generator
-    - Multiple models
-    - Manipulate model (Position / Rotate / Duplicate)
-    - Model export and G-code export
-    - Featured modes: Relief, Vector, Text
-    - Support Tabs
-- Snapmaker 2.0 only features
-    - Wi-Fi controls and file transfer
-    - Camera Aid Background
-- Case Library
-- Multi-Language Support
-- Keyboard shortcut
-- Custom Widgets
 
 ## How to install and run
 
@@ -49,20 +25,29 @@ It's recommended to use a stable release version unless you want to do some modi
 For Linux distros (Debian for example), you may need to run following commands to install dependencies for Luban:
 
 ```Bashhist
-> sudo dpkg install snapmaker-luban-{version}-linux-amd64.deb
+> sudo dpkg --install snapmaker-luban-{version}-linux-amd64.deb
 > sudo apt install --fix-broken
 ```
-
 
 ### Run from source code
 
 Checkout [Development](./docs/Development.md) to how to run and develop from source code.
 
-
 ## Feedback & Contribution
 
 - To submit a bug or feature request, [file an issue](https://github.com/Snapmaker/Luban/issues/new) in github issues.
 - To contribute some code, make sure you have read and followed our guidelines for [contributing](https://github.com/Snapmaker/Luban/blob/master/CONTRIBUTING.md).
+
+## Translations
+
+We use crowdin for collaborative translations. We would greatly appreciate your assistance in improving our translations.
+
+| Language | Crowdin Link |
+| ---------| -------------|
+| Ukrainian (Українська) | [Ukrainian translations](https://crowdin.com/project/luban/uk) |
+| German (Deutsch) | [German translations](https://crowdin.com/project/luban/de) |
+| Italian (Italiano) | [Italian translations](https://crowdin.com/project/luban/it) |
+| Chinese Simplified (简体中文) | [Chinese translations](https://crowdin.com/project/luban/zh-CN) |
 
 
 ## License

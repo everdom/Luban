@@ -1,5 +1,10 @@
 import request from 'superagent';
 import sendMessage from '../utils/sendMessage';
+import logger from '../../../lib/logger';
+
+const log = logger('service:worker:heartBeat');
+
+
 type IParam = { token: string, host: string, stop?: boolean }
 
 let errorCount = 0;
@@ -7,16 +12,20 @@ const screenTimeout = 8 * 1000;
 let timeoutHandle = null;
 let intervalHandle = null;
 
-const stopBeat = (msg?: string) => {
+const stopBeat = (msg?: string, flag?: number) => {
+    log.debug(`offline flag=${flag}`);
     clearInterval(intervalHandle);
+    intervalHandle = null;
     sendMessage({ status: 'offline', msg });
 };
 
-const heartBeat = (param: IParam) => {
+let logCounter = 0;
+
+const heartBeat = async (param: IParam) => {
     return new Promise((resolve) => {
         const { token, host, stop } = param;
         if (stop && intervalHandle) {
-            resolve(stopBeat());
+            resolve(stopBeat('', 1));
             return;
         }
 
@@ -28,17 +37,23 @@ const heartBeat = (param: IParam) => {
                 .timeout(3000)
                 .end((err: Error, res) => {
                     if (err) {
+                        log.warn(`beat err=${err?.message}`);
                         if (err.message.includes('Timeout')) {
-                            timeoutHandle = setTimeout(() => {
-                                resolve(stopBeat(err.message));
-                            }, screenTimeout);
+                            if (!timeoutHandle) {
+                                timeoutHandle = setTimeout(() => {
+                                    resolve(stopBeat(err.message, 2));
+                                }, screenTimeout);
+                            }
                         } else {
                             errorCount++;
                             if (errorCount >= 3) {
-                                resolve(stopBeat(err.message));
+                                resolve(stopBeat(err.message, 3));
                             }
                         }
                     } else {
+                        if (++logCounter % 10 === 0) {
+                            log.info(`beat status=${res?.status}`);
+                        }
                         timeoutHandle = clearTimeout(timeoutHandle);
                         errorCount = 0;
                         sendMessage({
@@ -53,7 +68,12 @@ const heartBeat = (param: IParam) => {
                     }
                 });
         }
-        intervalHandle = setInterval(beat, 1000);
+        if (intervalHandle) {
+            return;
+        }
+        beat();
+        clearInterval(intervalHandle);
+        intervalHandle = setInterval(beat, 2000);
     });
 };
 

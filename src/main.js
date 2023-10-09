@@ -1,26 +1,33 @@
+import { enable as electronEnable, initialize as electronRemoteMainInitialize } from '@electron/remote/main';
 import 'core-js/stable';
-import 'regenerator-runtime/runtime';
-import { app, BrowserWindow, protocol, screen, session, ipcMain, shell, Menu } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import { app, BrowserWindow, dialog, ipcMain, Menu, powerSaveBlocker, protocol, screen, session, shell } from 'electron';
 import Store from 'electron-store';
-import url from 'url';
+import { autoUpdater } from 'electron-updater';
 import fs from 'fs';
-import { isUndefined, isNull } from 'lodash';
+import { debounce, isNull, isUndefined } from 'lodash';
+import log from 'loglevel';
+import fetch from 'node-fetch';
 import path from 'path';
-import { configureWindow } from './electron-app/window';
-import MenuBuilder, { addRecentFile, cleanAllRecentFiles } from './electron-app/Menu';
-import DataStorage from './DataStorage';
-import pkg from './package.json';
-// const { crashReporter } = require('electron');
+import 'regenerator-runtime/runtime';
+import url from 'url';
 
+import DataStorage from './DataStorage';
+import MenuBuilder, { addRecentFile, cleanAllRecentFiles } from './electron-app/Menu';
+import { configureWindow } from './electron-app/window';
+import pkg from './package.json';
+
+
+log.setLevel(log.levels.INFO);
 
 const config = new Store();
 const userDataDir = app.getPath('userData');
+global.luban = {
+    userDataDir
+};
 let serverData = null;
 let mainWindow = null;
-// https://www.electronjs.org/docs/latest/breaking-changes#planned-breaking-api-changes-100
-// console.log('getCrashesDirectory', app.getPath('crashDumps'));
 let loadUrl = '';
+let powerId = 0;
 const loadingMenu = [{
     id: 'file',
     label: '',
@@ -28,15 +35,11 @@ const loadingMenu = [{
 
 const childProcess = require('child_process');
 
-const USER_DATA_DIR = 'userDataDir';
 const SERVER_DATA = 'serverData';
 const UPLOAD_WINDOWS = 'uploadWindows';
-// crashReporter.start({
-//     productName: 'Snapmaker',
-//     globalExtra: { _companyName: 'Snapmaker' },
-//     submitURL: 'https://api.snapmaker.com',
-//     uploadToServer: true
-// });
+
+const { CLIENT_PORT, SERVER_PORT } = pkg.config;
+
 
 function getBrowserWindowOptions() {
     const defaultOptions = {
@@ -47,10 +50,11 @@ function getBrowserWindowOptions() {
         show: false,
         useContentSize: true,
         title: `${pkg.name} ${pkg.version}`,
-        // https://www.electronjs.org/docs/latest/breaking-changes#default-changed-enableremotemodule-defaults-to-false
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
+            // remote module is default false
+            // https://www.electronjs.org/docs/latest/breaking-changes#default-changed-enableremotemodule-defaults-to-false
             enableRemoteModule: true,
             nodeIntegrationInWorker: true
         }
@@ -132,9 +136,34 @@ function updateHandle() {
     autoUpdater.on('checking-for-update', () => {
         sendUpdateMessage(message.checking);
     });
+
     // Emitted when there is an available update. The update is downloaded automatically if autoDownload is true.
-    autoUpdater.on('update-available', (downloadInfo) => {
+    autoUpdater.on('update-available', async (downloadInfo) => {
         sendUpdateMessage(message.updateAva);
+
+        // Get chinese version of release note for zh-CN locale
+        if (app.getLocale() === 'zh-CN') {
+            if (!downloadInfo.releaseNotes && process.platform !== 'linux') {
+                // for aliyuncs
+                const changelogUrl = `https://snapmaker.oss-cn-beijing.aliyuncs.com/snapmaker.com/download/luban/Snapmaker-Luban-${downloadInfo.version}.changelog.md`;
+                const result = await fetch(changelogUrl,
+                    {
+                        mode: 'cors',
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'text/markdown'
+                        }
+                    })
+                    .then((response) => {
+                        response.headers['access-control-allow-origin'] = { value: '*' };
+                        return response.text();
+                    });
+
+                downloadInfo.releaseChangeLog = result;
+                downloadInfo.releaseName = `v${downloadInfo.version}`;
+            }
+        }
+
         mainWindow.webContents.send('update-available', { ...downloadInfo, prevVersion: app.getVersion() });
     });
     // Emitted when there is no available update.
@@ -145,24 +174,28 @@ function updateHandle() {
         mainWindow.setProgressBar(progressObj.percent / 100);
     });
     // downloadInfo — for generic and github providers
-    autoUpdater.on('update-downloaded', (downloadInfo) => {
+    autoUpdater.on('update-downloaded', debounce((downloadInfo) => {
         ipcMain.on('replaceAppNow', () => {
             // some code here to handle event
             autoUpdater.quitAndInstall();
         });
         mainWindow.webContents.send('is-replacing-app-now', downloadInfo);
-    });
+    }), 300);
     // Emitted when the user agrees to download
     ipcMain.on('startingDownloadUpdate', () => {
         mainWindow.webContents.send('download-has-started');
         autoUpdater.downloadUpdate();
     });
     // Emitted when is ready to check for update
-    ipcMain.on('checkForUpdate', async () => {
+    ipcMain.on('checkForUpdate', async (event, autoUpdateProviderOptions) => {
+        log.info(`checkForUpdates, feed URL: ${autoUpdateProviderOptions.url} (${autoUpdateProviderOptions.provider})`);
+
+        autoUpdater.setFeedURL(autoUpdateProviderOptions);
+
         try {
             await autoUpdater.checkForUpdates();
         } catch (e) {
-            console.log('Check for update failed', e);
+            log.warn('Check for update failed', e);
         }
     });
     ipcMain.on('updateShouldCheckForUpdate', (event, shouldCheckForUpdate) => {
@@ -170,6 +203,9 @@ function updateHandle() {
     });
     ipcMain.on('open-saved-path', (event, savedPath) => {
         shell.openPath(savedPath);
+    });
+    ipcMain.on('open-engine-test-path', (event, enginePath) => {
+        shell.openPath(enginePath);
     });
 }
 
@@ -195,22 +231,130 @@ if (process.platform === 'win32') {
     }
 }
 
+const startToBegin = (data) => {
+    serverData = data;
+    const { address, port } = data;
+    configureWindow(mainWindow);
+
+    updateHandle();
+
+    loadUrl = `http://${address}:${port}`;
+
+    // register file protocol
+    protocol.registerFileProtocol(
+        'luban',
+        (request, callback) => {
+            console.log('file protocol URL:', request.url);
+            const { pathname } = url.parse(request.url);
+            const p = pathname === '/' ? 'index.html' : pathname.substr(1);
+            const filePath = path.normalize(`${__dirname}/app/${p}`);
+            callback(fs.createReadStream(filePath));
+        },
+        (error) => {
+            if (error) {
+                console.error('error', error);
+            }
+        }
+    );
+
+    // https://github.com/electron/electron/issues/23393
+    protocol.registerFileProtocol('atom', (request, cb) => {
+        const pathname = decodeURI(request.url.replace('atom://', ''));
+        cb(pathname);
+    });
+    // https://github.com/electron/electron/issues/21675
+    // If needed, resolve CORS. https://stackoverflow.com/questions/51254618/how-do-you-handle-cors-in-an-electron-app
+
+    const filter = {
+        urls: [
+            'http://*/resources/images/*',
+            'http://*/app.css',
+            'http://*/polyfill.*.*',
+            'http://*/vendor.*.*',
+            'http://*/app.*.*',
+        ]
+    };
+    session.defaultSession.webRequest.onBeforeRequest(
+        filter,
+        (request, callback) => {
+            const redirectURL = request.url.replace(/^http/, 'luban');
+            callback({ redirectURL });
+        }
+    );
+
+    // Ignore proxy settings
+    // https://electronjs.org/docs/api/session#sessetproxyconfig-callback
+
+    electronRemoteMainInitialize();
+
+    const webContentsSession = mainWindow.webContents.session;
+    electronEnable(mainWindow.webContents);
+
+    webContentsSession.setProxy({ proxyRules: 'direct://' })
+        .then(() => mainWindow.loadURL(loadUrl).catch(err => {
+            console.log('err', err.message);
+        }));
+
+    try {
+        // TODO: move to server
+        DataStorage.init();
+    } catch (err) {
+        console.error(`Initialize data storage error: ${err}`);
+    }
+};
+
+let serverProcess;
 const showMainWindow = async () => {
     const windowOptions = getBrowserWindowOptions();
     const window = new BrowserWindow(windowOptions);
     mainWindow = window;
+    powerId = powerSaveBlocker.start('prevent-display-sleep');
+
     if (process.platform === 'win32') {
         const menu = Menu.buildFromTemplate(loadingMenu);
         Menu.setApplicationMenu(menu);
     }
+
+    // only start server once
     if (!serverData) {
-        // only start server once
-        // TODO: start server on the outermost
-        const child = childProcess.fork(path.resolve(__dirname, 'server-cli.js'));
+        if (process.env.NODE_ENV === 'development') {
+            process.chdir(path.resolve(__dirname, 'server'));
+            // Use require instead of import to avoid being precompiled in production mode
+            const { createServer } = require('./server');
+            createServer({
+                port: SERVER_PORT,
+                host: '127.0.0.1'
+            }, (err, data) => {
+                startToBegin({ ...data, port: CLIENT_PORT });
+            });
+        } else {
+            serverProcess = childProcess.fork(
+                path.resolve(__dirname, 'server-cli.js'),
+                [],
+                {
+                    env: {
+                        ...process.env,
+                        // USER_DATA_DIR: userDataDir,
+                        USER_DATA_DIR: app.getPath('userData')
+                    }
+                }
+            );
+            serverProcess.on('message', (data) => {
+                if (data.type === SERVER_DATA) {
+                    startToBegin(data);
+                } else if (data.type === UPLOAD_WINDOWS) {
+                    window.loadURL(loadUrl).catch(err => {
+                        console.log('err', err.message);
+                    });
+                }
+            });
+        }
         // window.webContents.openDevTools();
-        window.loadURL(path.resolve(__dirname, 'app', 'loading.html')).catch(err => {
-            console.log('err', err.message);
-        });
+        window.loadURL(path.resolve(__dirname, 'app', 'loading.html'))
+            .then(() => window.setTitle(`Snapmaker Luban ${pkg.version}`))
+            .catch(err => {
+                console.log('err', err.message);
+            });
         window.setBackgroundColor('#f5f5f7');
         if (process.platform === 'win32') {
             window.show();
@@ -219,72 +363,6 @@ const showMainWindow = async () => {
                 window.show();
             });
         }
-        child.send({
-            type: USER_DATA_DIR,
-            userDataDir
-        });
-        child.on('message', (data) => {
-            if (data.type === SERVER_DATA) {
-                serverData = data;
-                const { address, port } = { ...serverData };
-                configureWindow(window);
-                loadUrl = `http://${address}:${port}`;
-                const filter = {
-                    urls: [
-                        // 'http://*/',
-                        'http://*/resources/images/*',
-                        'http://*/app.css',
-                        'http://*/polyfill.*.*',
-                        'http://*/vendor.*.*',
-                        'http://*/app.*.*',
-                        'http://*/*/*.worker.js',
-                    ]
-                };
-                protocol.registerFileProtocol(
-                    'luban',
-                    (request, callback) => {
-                        const { pathname } = url.parse(request.url);
-                        const p = pathname === '/' ? 'index.html' : pathname.substr(1);
-                        callback(fs.createReadStream(path.normalize(`${__dirname}/app/${p}`)));
-                    },
-                    (error) => {
-                        if (error) {
-                            console.error('error', error);
-                        }
-                    }
-                );
-                // https://github.com/electron/electron/issues/21675
-                // If needed, resolve CORS. https://stackoverflow.com/questions/51254618/how-do-you-handle-cors-in-an-electron-app
-
-                session.defaultSession.webRequest.onBeforeRequest(
-                    filter,
-                    (request, callback) => {
-                        const redirectURL = request.url.replace(/^http/, 'luban');
-                        callback({ redirectURL });
-                    }
-                );
-
-                // Ignore proxy settings
-                // https://electronjs.org/docs/api/session#sessetproxyconfig-callback
-
-                const webContentsSession = window.webContents.session;
-                webContentsSession.setProxy({ proxyRules: 'direct://' })
-                    .then(() => window.loadURL(loadUrl).catch(err => {
-                        console.log('err', err.message);
-                    }));
-
-                try {
-                    // TODO: move to server
-                    DataStorage.init();
-                } catch (err) {
-                    console.error('Error: ', err);
-                }
-            } else if (data.type === UPLOAD_WINDOWS) {
-                window.loadURL(loadUrl).catch(err => {
-                    console.log('err', err.message);
-                });
-            }
-        });
         // serverData = await launchServer();
     } else {
         if (process.platform === 'win32') {
@@ -342,16 +420,206 @@ const showMainWindow = async () => {
         shell.openPath(`${userDataDir}/snapmaker-recover`);
     });
 
-    updateHandle();
+
+    // update download manager save path
+    ipcMain.on('update-download-manager-save-path', (_, data) => {
+        if (!data) return;
+        config.set('downloadSavePath', JSON.parse(data).path);
+    });
+
+    // download mananger
+    const downloadingArr = [];
+    mainWindow.webContents.session.on('will-download', (event, downloadItem) => {
+        const fileName = downloadItem.getFilename();
+        const downloadUrl = downloadItem.getURL();
+        const startTime = downloadItem.getStartTime();
+        const initialState = downloadItem.getState();
+
+        let savePath = path.join(config.get('downloadSavePath'), fileName);
+
+        // avoid duplicate file name
+        let fileNum = 0;
+        const ext = path.extname(savePath);
+        const name = path.basename(savePath, ext);
+        const dir = path.dirname(savePath);
+        while (fs.existsSync(savePath)) {
+            fileNum += 1;
+            savePath = path.format({
+                dir,
+                ext,
+                name: `${name}${fileNum > 0 ? `(${fileNum})` : ''}`,
+            });
+        }
+        savePath && downloadItem.setSavePath(savePath);
+
+        // record current download【for now, this just for stop/delete】
+        downloadingArr.push({
+            savePath,
+            ext,
+            name,
+            fileNum,
+            downloadUrl,
+            startTime,
+            state: initialState,
+            paused: downloadItem.isPaused(),
+            ref: downloadItem
+        });
+
+        // send msg to renderer process, a new download start
+        mainWindow.webContents.send('new-download-item', {
+            savePath,
+            ext,
+            name,
+            fileNum,
+            downloadUrl,
+            startTime,
+            state: initialState,
+            paused: downloadItem.isPaused(),
+            totalBytes: downloadItem.getTotalBytes(),
+            receivedBytes: downloadItem.getReceivedBytes(),
+        });
+
+        // update download item status
+        downloadItem.on('updated', (e, state) => {
+            mainWindow.webContents.send('download-item-updated', {
+                savePath,
+                ext,
+                name,
+                fileNum,
+                downloadUrl,
+                startTime,
+                state,
+                paused: downloadItem.isPaused(),
+                totalBytes: downloadItem.getTotalBytes(),
+                receivedBytes: downloadItem.getReceivedBytes(),
+            });
+        });
+
+        // download done
+        downloadItem.on('done', (e, state) => {
+            mainWindow.webContents.send('download-item-done', {
+                savePath,
+                ext,
+                name,
+                fileNum,
+                downloadUrl,
+                startTime,
+                state,
+                paused: downloadItem.isPaused(),
+                totalBytes: downloadItem.getTotalBytes(),
+                receivedBytes: downloadItem.getReceivedBytes(),
+            });
+
+            // remove finish downloadItem in downloading arr
+            const finishIndex = downloadingArr.findIndex(item => item.savePath === savePath && item.startTime === startTime);
+            downloadingArr.splice(finishIndex, 1);
+        });
+    });
+
+    // open dialog for setting Download Manager default download path(save path)
+    ipcMain.on('select-directory', () => {
+        dialog
+            .showOpenDialog({
+                title: 'Select a location to save',
+                properties: ['openDirectory', 'createDirectory'],
+            })
+            .then(res => {
+                mainWindow.webContents.send('selected-directory', JSON.stringify(res));
+            })
+            .catch(e => console.error(e));
+    });
+
+    ipcMain.on('select-file', async () => {
+        const res = await dialog.showOpenDialog({
+            title: 'Select file',
+            properties: ['openFile'],
+        });
+
+        mainWindow.webContents.send('select-file-success', res);
+    });
+
+    // open download manager save path floder by sys file Explorer
+    ipcMain.on('open-download-save-path', (_, savePath) => {
+        shell.openPath(savePath);
+    });
+
+    // open browser
+    ipcMain.on('open-browser', (_, browserUrl) => {
+        shell.openExternal(browserUrl);
+    });
+
+    // remove download manager file/files/folder
+    const rmDir = (dirPath, removeSelf = true) => {
+        let files;
+        try {
+            files = fs.readdirSync(dirPath);
+        } catch (e) {
+            console.error(`Read directory fail ${dirPath}`);
+            return;
+        }
+
+        if (files.length > 0) {
+            for (let i = 0; i < files.length; i++) {
+                const filePath = `${dirPath}/${files[i]}`;
+                if (fs.statSync(filePath).isFile()) {
+                    fs.unlinkSync(filePath);
+                } else {
+                    rmDir(filePath);
+                }
+            }
+        }
+        if (removeSelf) {
+            fs.rmdirSync(dirPath);
+        }
+    };
+    const clearPath = removePath => {
+        if (fs.existsSync(removePath)) {
+            if (fs.statSync(removePath).isFile()) {
+                fs.unlink(removePath, err => err && console.error(err));
+            } else {
+                rmDir(removePath, true);
+            }
+        }
+    };
+    ipcMain.on('download-manager-remove-file', (_, downloadItem) => {
+        const { savePath, startTime } = downloadItem;
+        const finishIndex = downloadingArr.findIndex(item => item.savePath === savePath && item.startTime === startTime);
+        // if is finished download item,
+        if (finishIndex === -1) {
+            // remove local file(for now no need to delete local file)
+            // clearPath(downloadItem.savePath);
+            return;
+        }
+
+        // if is downloading, cancel it
+        try {
+            const target = downloadingArr[finishIndex];
+            target.ref.cancel();
+        } catch (err) {
+            console.error(err);
+        }
+
+        // remove curr downloadItem
+        downloadingArr.splice(finishIndex, 1);
+    });
+    ipcMain.on('clear-files', (_, removePaths) => {
+        removePaths.forEach(removePath => clearPath(removePath));
+    });
 };
 
 // Allow max 4G memory usage
 if (process.arch === 'x64') {
-    app.commandLine.appendSwitch('--js-flags', '--max-old-space-size=4096');
+    app.commandLine.appendSwitch('--js-flags', '--max-old-space-size=6144');
 }
 
 app.commandLine.appendSwitch('ignore-gpu-blacklist');
 
+if (process.platform === 'linux') {
+    // https://github.com/electron/electron/issues/18265
+    // TODO: Maybe we can only disable --disable-setuid-sandbox
+    //   reference changes: https://github.com/microsoft/vscode/pull/122909/files
+    app.commandLine.appendSwitch('--no-sandbox');
+}
 
 /**
  * On macOS, re-create a window when dock icon clicked.
@@ -394,6 +662,7 @@ app.on('window-all-closed', () => {
     // after all windows have been closed.
     // if (process.platform !== 'darwin') {
     // }
+    powerSaveBlocker.stop(powerId);
 
     app.quit();
 });
@@ -402,6 +671,8 @@ app.on('window-all-closed', () => {
  * Final chance to cleanup before app quit.
  */
 app.on('will-quit', () => {
+    serverProcess?.kill();
+
     DataStorage.clear();
 });
 
@@ -421,7 +692,7 @@ app.on('second-instance', (event, commandLine) => {
         }
     }
 });
-protocol.registerSchemesAsPrivileged([{ scheme: 'luban', privileges: { standard: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: 'luban', privileges: { standard: true, corsEnabled: true } }]);
 
 /**
  * when ready

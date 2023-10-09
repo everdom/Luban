@@ -1,26 +1,24 @@
 import React from 'react';
-import Modal from '../components/Modal/tileModal';
-// import { Button } from '../components/Buttons';
 
-// import i18n from '../../lib/i18n';
+import Modal from '../components/Modal/tileModal';
+import log from '../../lib/log';
+
 
 export default function renderPopup(options) {
-    const { onClose, component: Component, key } = options;
-
+    const { onClose, component: Component, key, onCallBack } = options;
 
     if (!onClose) {
-        console.error('Popup need close action');
+        log.error('Popup need close action');
     }
     if (!Component) {
-        console.error('Popup need component to render');
+        log.error('Popup need component to render');
     }
 
-
     return (
-        <Modal closable={false} disableOverlay tile style={{ width: '100%', height: '100%' }} onClose={onClose}>
+        <Modal closable={false} disableOverlay tile style={{ width: '100%', height: '100%' }} onClose={onClose} zIndex="998">
 
             {/* <Modal.Body style={{ padding: '0' }}> */}
-            <Component isPopup onClose={onClose} key={key} />
+            <Component isPopup onClose={onClose} key={key} onCallBack={onCallBack} />
             {/* </Modal.Body> */}
 
         </Modal>

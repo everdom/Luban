@@ -1,44 +1,44 @@
 import React from 'react';
 import PropTypes from 'prop-types';
+// import { Switch } from 'antd';
 import i18n from '../../../lib/i18n';
-import TipTrigger from '../../components/TipTrigger';
 import Checkbox from '../../components/Checkbox';
 
-function CheckboxItem({ definitionKey, settings, calculateTextIndex = () => 0, width = 'auto', isOfficialDefinition = () => true, onChangeDefinition, defaultValue }) {
+function CheckboxItem({
+    definitionKey,
+    settings,
+    // calculateTextIndex = () => 0,
+    width = 'auto',
+    onChangePresetSettings,
+    defaultValue,
+    configCategory
+}) {
     const setting = settings[definitionKey];
-    const { label, description } = setting;
+
+    const { label } = setting;
     return (
-        <TipTrigger title={i18n._(label)} content={i18n._(description)} key={definitionKey}>
-            <div
-                className="sm-flex height-32 margin-vertical-8"
-            >
-                <Checkbox
-                    className="sm-flex-auto sm-flex-order-negative"
-                    style={{ width: width,
-                        cursor: isOfficialDefinition(definitionKey) ? 'not-allowed' : 'default',
-                        marginLeft: calculateTextIndex(definitionKey)
-                    }}
-                    checked={defaultValue}
-                    disabled={isOfficialDefinition(definitionKey)}
-                    onChange={(event) => onChangeDefinition(definitionKey, event.target.checked)}
-                />
-                <span
-                    className="margin-left-8"
-                >
-                    {i18n._(label)}
-                </span>
-            </div>
-        </TipTrigger>
+        <div className="sm-flex height-32 margin-vertical-8">
+            <Checkbox
+                className="sm-flex-auto sm-flex-order-negative"
+                style={{
+                    width: width,
+                    // marginLeft: calculateTextIndex(definitionKey)
+                }}
+                checked={defaultValue}
+                onChange={(e) => onChangePresetSettings(definitionKey, e.target.checked, configCategory)}
+            />
+            <span className="margin-left-8">{i18n._(label)}</span>
+        </div>
     );
 }
 CheckboxItem.propTypes = {
     settings: PropTypes.object.isRequired,
-    calculateTextIndex: PropTypes.func,
+    // calculateTextIndex: PropTypes.func,
     definitionKey: PropTypes.string.isRequired,
     defaultValue: PropTypes.bool.isRequired,
-    isOfficialDefinition: PropTypes.func,
     width: PropTypes.string,
-    onChangeDefinition: PropTypes.func.isRequired
+    onChangePresetSettings: PropTypes.func.isRequired,
+    configCategory: PropTypes.string
 };
 
 export default React.memo(CheckboxItem);

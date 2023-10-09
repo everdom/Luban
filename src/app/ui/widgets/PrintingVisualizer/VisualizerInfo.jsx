@@ -14,26 +14,34 @@ const GcodeInfo = () => {
     const printTime = useSelector(state => state?.printing?.printTime, shallowEqual);
     const filamentLength = useSelector(state => state?.printing?.filamentLength, shallowEqual);
     const filamentWeight = useSelector(state => state?.printing?.filamentWeight, shallowEqual);
-    function getFilamentDes() {
-        if (!filamentLength || !filamentWeight) {
-            return '';
-        }
-        return `${filamentLength.toFixed(1)} m / ${filamentWeight.toFixed(1)} g`;
+    let filamentLeftDes = `${filamentLength[0].toFixed(1)} m / ${filamentWeight[0].toFixed(1)} g`;
+    let filamentRightDes = filamentLength[1] ? `${filamentLength[1].toFixed(1)} m / ${filamentWeight[1].toFixed(1)} g` : '';
+
+    if (filamentRightDes) {
+        filamentLeftDes += ' (L)';
+        filamentRightDes += ' (R)';
     }
-    const filamentDes = getFilamentDes();
+
     const printTimeDes = humanReadableTime(printTime);
     return (
         <React.Fragment>
-            <p>
-                <span className="fa fa-bullseye" />
-                <Space width={4} />
-                {filamentDes}
-            </p>
             <p>
                 <span className="fa fa-clock-o" />
                 <Space width={4} />
                 {printTimeDes}
             </p>
+            <p>
+                <span className="fa fa-bullseye" />
+                <Space width={4} />
+                {filamentLeftDes}
+            </p>
+            {filamentRightDes && (
+                <p>
+                    <span className="fa fa-bullseye" />
+                    <Space width={4} />
+                    {filamentRightDes}
+                </p>
+            )}
         </React.Fragment>
     );
 };

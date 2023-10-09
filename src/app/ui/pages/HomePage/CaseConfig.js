@@ -458,3 +458,106 @@ export const CaseConfigA350LaserFourAxis = [
         }
     }
 ];
+
+// Pen Holder for Snapmaker Artisan (2022.12)
+// Note that this can only be used by Artisan
+export const CaseConfigPenHolder = {
+    tag: 'printing', // printing、laser、cnc
+    tag_i18n: 'key-HomePage/CaseLibrary_title-3DP',
+    title: 'key-HomePage/CaseLibrary-Pen Holder',
+    imgSrc: '../../resources/images/user-case/printing/3dp_pen_holder_194x194.png',
+    pathConfig: {
+        isDatastoragePath: true,
+        path: './UserCase/printing/Case-PenHolder.snap3dp',
+        name: 'Case-PenHolder.snap3dp',
+    }
+};
+
+// CNC Luban Lock (2022.12)
+// Note that this can only be used by Artisan
+export const CaseConfigLubanLock = {
+    tag: 'cnc',
+    tag_i18n: 'key-HomePage/CaseLibrary_title-CNC',
+    title: 'key-HomePage/CaseLibrary-Luban Lock',
+    mode: 'greyscale',
+    imgSrc: '../../resources/images/user-case/cnc/cnc_luban_lock_194x194.png',
+    pathConfig: {
+        isDatastoragePath: true,
+        path: './UserCase/cnc/Luban Lock.snapcnc',
+        name: 'Luban Lock.snapcnc',
+    }
+};
+
+// 3DP case: Gimbal (dual color) (2022.12)
+// J1 only
+export const CaseConfigGimbal = {
+    tag: 'printing',
+    tag_i18n: 'key-HomePage/CaseLibrary_title-3DP',
+    title: 'Gimbal',
+    imgSrc: '../../resources/images/user-case/printing/3dp_dual_color_gimbal_194x194.png',
+    pathConfig: {
+        isDatastoragePath: true,
+        path: './UserCase/printing/snapmaker_j1/Case-Gimbal-DualColor.snap3dp',
+        name: 'Case-Gimbal-DualColor.snap3dp',
+    }
+};
+
+export const CaseConfigSM2Gimbal = {
+    tag: 'printing',
+    tag_i18n: 'key-HomePage/CaseLibrary_title-3DP',
+    title: 'Gimbal',
+    imgSrc: '../../resources/images/user-case/printing/3dp_dual_color_gimbal_194x194.png',
+    pathConfig: {
+        isDatastoragePath: true,
+        path: './UserCase/printing/snapmaker2-dual-extruder/Case-SM2-Gimbal-DualColor.snap3dp',
+        name: 'Case-SM2-Gimbal-DualColor.snap3dp',
+    }
+};
+
+
+export const CaseConfigQuickStart = {
+    title: 'Quick Start',
+    author: 'snapmaker',
+    imgSrc: '../../resources/images/user-case/quick-start.jpg',
+    pathConfig: {
+        isDatastoragePath: false,
+        path: '',
+        name: '',
+    }
+};
+
+
+export const getLaserCaseConfigFor20WModule = () => {
+    return [
+        {
+            tag: 'laser',
+            tag_i18n: 'key-HomePage/CaseLibrary_title-Laser',
+            title: 'key-HomePage/CaseLibrary-wood rule',
+            mode: 'greyscale', // mode: 'vector','greyscale','bw','text','trace'
+            imgSrc: '../../resources/images/user-case/Laser-10w/wooden_ruler.png',
+            pathConfig: {
+                isDatastoragePath: true,
+                path: './UserCase/laser/20w_laser_module/wooden_ruler.snaplzr',
+                name: 'wooden_ruler.snaplzr'
+            }
+        },
+    ];
+};
+
+
+export const getLaserCaseConfigFor40WModule = () => {
+    return [
+        {
+            tag: 'laser',
+            tag_i18n: 'key-HomePage/CaseLibrary_title-Laser',
+            title: 'key-HomePage/CaseLibrary-wood rule',
+            mode: 'greyscale', // mode: 'vector','greyscale','bw','text','trace'
+            imgSrc: '../../resources/images/user-case/Laser-10w/wooden_ruler.png',
+            pathConfig: {
+                isDatastoragePath: true,
+                path: './UserCase/laser/40w_laser_module/wooden_ruler.snaplzr',
+                name: 'wooden_ruler.snaplzr'
+            }
+        },
+    ];
+};

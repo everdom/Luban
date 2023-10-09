@@ -6,11 +6,9 @@ const path = require('path');
 const findImports = require('find-imports');
 const webpack = require('webpack');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
-// const CSSSplitWebpackPlugin = require('css-split-webpack-plugin').default;
 const ManifestPlugin = require('webpack-manifest-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
-// const HtmlWebpackPluginAddons = require('html-webpack-plugin-addons');
 const nib = require('nib');
 const stylusLoader = require('stylus-loader');
 
@@ -36,31 +34,31 @@ module.exports = {
     context: path.resolve(__dirname, 'src/app'),
     resolve: {
         modules: [
+            path.resolve(__dirname, 'packages/*'),
             path.resolve(__dirname, 'src/shared'),
             path.resolve(__dirname, 'src/app'),
             'node_modules'
         ],
-        extensions: ['.js', '.json', '.jsx', '.styl', '.ts']
+        extensions: ['.js', '.json', '.jsx', '.styl', '.ts', '.tsx']
     },
     entry: {
         polyfill: path.resolve(__dirname, 'src/app/polyfill/index.js'),
         vendor: findImports([
             'src/app/**/*.{js,jsx}',
             '!src/app/polyfill/**/*.js',
-            '!src/app/widget/DevTools.js', // redux-devtools
             '!src/app/**/*.development.js'
         ], { flatten: true }),
         app: path.resolve(__dirname, 'src/app/index.jsx')
     },
     output: {
-        path: path.resolve(__dirname, 'dist/Luban/app'),
+        path: path.resolve(__dirname, 'dist/Luban/src/app'),
         chunkFilename: `[name].[chunkhash].bundle.js?_=${timestamp}`,
         filename: `[name].[chunkhash].bundle.js?_=${timestamp}`,
-        publicPath: publicPath
+        publicPath: publicPath,
     },
     optimization: {
-        // see notes on webpack.config.server.production.js
-        minimizer: [new TerserPlugin()]
+        minimize: true,
+        minimizer: [new TerserPlugin()],
     },
     plugins: [
         new stylusLoader.OptionsPlugin({
@@ -83,44 +81,89 @@ module.exports = {
             filename: '[name].css',
             chunkFilename: '[id].css'
         }),
-        /*
-        new CSSSplitWebpackPlugin({
-            size: 4000,
-            imports: '[name].[ext]?[hash]',
-            filename: '[name]-[part].[ext]?[hash]',
-            preserve: false
-        }),*/
         new HtmlWebpackPlugin({
             filename: 'index.html',
             template: path.resolve(__dirname, 'src/app/resources/assets/index.html'),
-            chunksSortMode: 'dependency' // Sort chunks by dependency
         })
     ],
     module: {
         rules: [
+            // ESLint
             {
-                test: /\.worker\.(j|t)s$/,
+                enforce: 'pre',
+                test: /\.(jsx?|tsx?)$/,
+                loader: 'eslint-loader',
+                exclude: /node_modules/,
+                options: {
+                    cache: false,
+                    fix: true,
+                    emitWarning: false,
+                    quiet: true,
+                    configFile: path.resolve(__dirname, '.eslintrc.js'),
+                },
+            },
+            // workers
+            {
+                test: /\.worker\.(js|ts)$/,
                 loader: 'worker-loader',
                 options: {
                     filename: '[name].js',
                 },
             },
+            // TypeScript/TSX
             {
-                test: /\.ts$/,
-                loader: 'ts-loader'
+                test: /\.tsx?$/,
+                use: [
+                    {
+                        loader: 'babel-loader',
+                        options: {
+                            presets: [
+                                '@babel/preset-env',
+                                [
+                                    '@babel/preset-react',
+                                    { pragma: 'createElement' },
+                                ],
+                            ],
+                        },
+                    },
+                    {
+                        loader: 'ts-loader',
+                        options: {
+                            transpileOnly: true
+                        }
+                    },
+                ]
             },
-            {
-                test: /\.jsx?$|\.ts$/,
-                loader: 'eslint-loader',
-                enforce: 'pre',
-                exclude: /node_modules/
-            },
+            // JavaScript/JSX
             {
                 test: /\.jsx?$/,
-                exclude: /(node_modules|bower_components)/,
+                exclude: /node_modules/,
                 loader: 'babel-loader',
-                options: babelConfig
+                options: babelConfig,
             },
+            // global styles
+            {
+                test: /\.styl$/,
+                use: [
+                    MiniCssExtractPlugin.loader,
+                    {
+                        loader: 'css-loader',
+                        options: {
+                            importLoaders: 1,
+                            modules: {
+                                mode: 'global',
+                                exportLocalsConvention: 'camelCase',
+                            },
+                            esModule: false,
+                        }
+                    },
+                    'stylus-loader',
+                ],
+                include: [
+                    path.resolve(__dirname, 'src/app/styles'),
+                ]
+            },
+            // Stylus
             {
                 test: /\.styl$/,
                 use: [
@@ -129,33 +172,27 @@ module.exports = {
                     {
                         loader: 'css-loader',
                         options: {
-                            camelCase: true, // export class names in camelCase
-                            modules: true, // enable CSS module
-                            importLoaders: 1, // loaders applied before css loader
-                            localIdentName: '[path][name]__[local]--[hash:base64:5]' // generated identifier
+                            importLoaders: 1,
+                            modules: {
+                                mode: 'local',
+                                exportLocalsConvention: 'camelCase',
+                                localIdentName: '[path][name]__[local]--[hash:base64:5]',
+                            },
+                            esModule: false,
                         }
                     },
-                    'stylus-loader'
+                    'stylus-loader',
                 ],
                 exclude: [
                     path.resolve(__dirname, 'src/app/styles')
                 ]
             },
-            {
-                test: /\.styl$/,
-                use: [
-                    MiniCssExtractPlugin.loader,
-                    'css-loader?camelCase',
-                    'stylus-loader'
-                ],
-                include: [
-                    path.resolve(__dirname, 'src/app/styles')
-                ]
-            },
+            // CSS files
             {
                 test: /\.css$/,
                 use: ['style-loader', 'css-loader']
             },
+            // image files
             {
                 test: /\.(png|jpg|svg)$/,
                 loader: 'url-loader',
@@ -163,16 +200,9 @@ module.exports = {
                     limit: 8192
                 }
             },
+            // font files
             {
-                test: /\.woff(2)?(\?v=[0-9]\.[0-9]\.[0-9])?$/,
-                loader: 'url-loader',
-                options: {
-                    limit: 10000,
-                    mimetype: 'application/font-woff'
-                }
-            },
-            {
-                test: /\.(ttf|eot)(\?v=[0-9]\.[0-9]\.[0-9])?$/,
+                test: /\.(ttf|woff|woff2|eot)(\?v=[0-9]\.[0-9]\.[0-9])?$/,
                 loader: 'file-loader'
             }
         ]
@@ -182,6 +212,6 @@ module.exports = {
     node: {
         fs: 'empty',
         net: 'empty',
-        tls: 'empty'
+        tls: 'empty',
     }
 };

@@ -3,21 +3,11 @@
 We would love for your to contribute to Snapmaker Luban and help make it better.
 Here are the guidelines we would like you to follow:
 
-- [Code of Conduct](#coc)
 - [Issues and Bugs](#issue)
 - [Feature Request](#feature)
 - [Pull Request](#pr)
 - [Code Style Guidelines](#code)
 - [Commit Message Guidelines](#commit)
-
-
-## <a name="coc"></a> Code of Conduct
-
-As contributors and maintainers of the Snapmaker Luban project, we pledge to respect everyone who contributes by posting issues, updating documentation, submitting pull requests, providing feedback in comments, and any other activities.
-
-Communication through any of Snapmaker Luban's channels (GitHub, Forum, Facebook Group, etc.) must be constructive and never resort to personal attacks, trolling, public or private harassment, insults, or other unprofessional conduct.
-
-If any member of the community violates this code of conduct, the maintainers of the Snapmaker Luban project may take action, removing issues, comments, and PRs or blocking accounts as deemed appropriate.
 
 ## <a name="issue"></a> Found a Bug?
 
@@ -36,7 +26,9 @@ You can *request a new feature* by [submitting an issue](https://github.com/Snap
 If you would like to *implement a new feature*, please submit an issue with a proposal for your work first, to be sure that we can use it.
 Small Features can be crafted and directly submitted as a Pull Request.
 
-## <a name="pr"></a> Pull Request
+Our [Development](docs/Development.md) documentation describes how to setup your development environment (macOS/Ubuntu/Windows) and run Snapmaker Luban from source code.
+
+### <a name="pr"></a> Pull Request
 
 Before you submit your Pull Request (PR) consider the following guidelines:
 
@@ -46,7 +38,7 @@ Discussing the design up front helps to ensure that we're ready to accept your w
 3. Fork the `Snapmaker/Luban` repo.
 4. Make your changes in a new git branch
     ```
-    git checkout -b my-fix-branch master
+    git checkout -b my-fix-branch main
     ```
 5. Make changes to the source code follow [our code style guidelines](#code), best to **include appropriate test cases**.
 When you run `git push`, our git hook will call eslint to run a lint over source code automatically.
@@ -54,11 +46,6 @@ When you run `git push`, our git hook will call eslint to run a lint over source
 7. Commit your changes using a descriptive commit message that follows [our commit message guidelines](#commit).
 We also have a git hook script to check your commit message, for convenience you can just type `npm run commit` to use
 [Commitizen's CLI tool](https://github.com/commitizen/cz-cli) to help you write commit messages.
-
-    ```
-    npm run commit
-    ```
-    Or
 
     ```
     git commit
@@ -69,16 +56,16 @@ We also have a git hook script to check your commit message, for convenience you
     ```
     git push origin my-fix-branch
     ```
+
 9. In Github, send a pull request to `Snapmaker/Luban`.
 
    If we suggest,
 
    - Make updates on your branch
-   - Re-run all tests
    - Rebase your branch and force push to your GitHub repository (this will update your Pull Request):
 
      ```
-     git rebase master -i
+     git rebase main -i
      git push -f
      ```
 
@@ -94,10 +81,10 @@ After your pull request is merged, you can safely delete your branch and pull th
   git push origin --delete my-fix-branch
   ```
 
-- Check out the master branch:
+- Check out the `main` branch:
 
   ```
-  git checkout master -f
+  git checkout main -f
   ```
 
 - Delete the local branch:
@@ -106,13 +93,13 @@ After your pull request is merged, you can safely delete your branch and pull th
   git branch -D my-fix-branch
   ```
 
-- Update your master with the latest upstream version:
+- Update your `main` branch with the latest upstream version:
 
   ```
-  git pull --ff upstream master
+  git pull --ff upstream main
   ```
 
-## <a name="code"></a> Code Style Guidelines
+### <a name="code"></a> Code Style Guidelines
 
 Generally, we follow [Airbnb's JavaScript Style Guide](https://github.com/airbnb/javascript), based
 on that we write a [ESLint config for Snapmaker](https://github.com/Snapmaker/eslint-config-snapmaker)
@@ -126,7 +113,7 @@ A githook is also added to run the check automatically before every git push.
 npm run lint
 ```
 
-## <a name="commit"></a> Commit Message Guidelines
+### <a name="commit"></a> Commit Message Guidelines
 
 We have rules over how git commit message can be formatted. This leads to **more readable message**
 that are easy to follow when looking through the **project history**.

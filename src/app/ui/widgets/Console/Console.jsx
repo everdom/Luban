@@ -1,24 +1,46 @@
+import { WorkflowStatus } from '@snapmaker/luban-platform';
 import color from 'cli-color';
-import React, { useEffect, useRef, useState } from 'react';
+import { includes } from 'lodash';
 import PropTypes from 'prop-types';
+import React, { useEffect, useRef, useState } from 'react';
 // import classNames from 'classnames';
-import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import pubsub from 'pubsub-js';
+import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import { useHistory, withRouter } from 'react-router-dom';
+
 import settings from '../../../config/settings';
-import i18n from '../../../lib/i18n';
-import usePrevious from '../../../lib/hooks/previous';
-import { actions as machineActions } from '../../../flux/machine';
-import { controller } from '../../../lib/controller';
-import Terminal from './Terminal';
-import { ABSENT_OBJECT, CONNECTION_TYPE_SERIAL, CONNECTION_TYPE_WIFI,
-    WORKFLOW_STATE_RUNNING, WORKFLOW_STATE_PAUSED
+import {
+    ABSENT_OBJECT,
+    CONNECTION_TYPE_SERIAL,
 } from '../../../constants';
+import { actions as workspaceActions } from '../../../flux/workspace';
+import { controller } from '../../../communication/socket-communication';
+import usePrevious from '../../../lib/hooks/previous';
+import i18n from '../../../lib/i18n';
+import Terminal from './Terminal';
 
 let pubsubTokens = [];
 let unlisten = null;
 function Console({ widgetId, widgetActions, minimized, isDefault, clearRenderStamp }) {
-    const { port, server, isConnected, connectionType, terminalHistory, consoleHistory, consoleLogs, workflowStatus } = useSelector(state => state.machine, shallowEqual);
+    const {
+        connectionType,
+        isConnected,
+
+        port,
+        server,
+    } = useSelector(state => state.workspace, shallowEqual);
+
+    const {
+        workflowStatus,
+    } = useSelector(state => state.workspace, shallowEqual);
+
+    const {
+        terminalHistory,
+        consoleHistory,
+        consoleLogs,
+        shouldHideConsole
+    } = useSelector(state => state.workspace, shallowEqual);
+
     const [shouldRenderFitaddon, setShouldRenderFitaddon] = useState(false);
     const history = useHistory();
     const dispatch = useDispatch();
@@ -46,6 +68,11 @@ function Console({ widgetId, widgetActions, minimized, isDefault, clearRenderSta
             const { data } = options;
             const terminal = terminalRef.current;
             terminal && terminal.writeln(data);
+        },
+        'connection:executeGcode': (gcodeArray) => {
+            if (gcodeArray) {
+                dispatch(workspaceActions.addConsoleLogs(gcodeArray));
+            }
         }
     };
 
@@ -64,7 +91,7 @@ function Console({ widgetId, widgetActions, minimized, isDefault, clearRenderSta
             } else if (data === 'clear') {
                 actions.clearAll();
             } else {
-                dispatch(machineActions.executeGcode(data));
+                dispatch(workspaceActions.executeGcode(data));
             }
         },
 
@@ -218,6 +245,7 @@ function Console({ widgetId, widgetActions, minimized, isDefault, clearRenderSta
         pubsubTokens = [];
     }
 
+
     useEffect(() => {
         widgetActions.setTitle(i18n._('key-Workspace/Console-Console'));
         widgetActions.setControlButtons([
@@ -281,16 +309,17 @@ function Console({ widgetId, widgetActions, minimized, isDefault, clearRenderSta
     }, [isConnected, port, server]);
 
     useEffect(() => {
-        if (connectionType === CONNECTION_TYPE_SERIAL) {
+        const isWorking = includes([WorkflowStatus.Running, WorkflowStatus.Pausing, WorkflowStatus.Paused], workflowStatus);
+        if (!isConnected) {
             widgetActions.setDisplay(true);
-        } else if (connectionType === CONNECTION_TYPE_WIFI) {
-            if (workflowStatus === WORKFLOW_STATE_RUNNING || workflowStatus === WORKFLOW_STATE_PAUSED) {
+        } else {
+            if (isWorking && shouldHideConsole) {
                 widgetActions.setDisplay(false);
             } else {
                 widgetActions.setDisplay(true);
             }
         }
-    }, [workflowStatus, connectionType]);
+    }, [workflowStatus, connectionType, isConnected]);
 
     useEffect(() => {
         if (prevProps && prevProps.clearRenderStamp !== clearRenderStamp) {
@@ -328,7 +357,8 @@ function Console({ widgetId, widgetActions, minimized, isDefault, clearRenderSta
         }
     }, [isDefault]);
 
-    const inputValue = terminalHistory.get(0) || '';
+    const inputValue = terminalHistory.getLength() > 0 ? terminalHistory.get(0) : '';
+
     return (
         <div>
             <Terminal

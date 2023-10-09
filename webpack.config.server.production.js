@@ -1,5 +1,3 @@
-/* eslint no-var: 0 */
-/* eslint prefer-arrow-callback: 0 */
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -33,30 +31,21 @@ module.exports = {
     mode: 'production',
     target: 'node',
     context: path.resolve(__dirname, 'src/server'),
+    resolve: {
+        modules: ['node_modules'],
+        extensions: ['.js', '.json', '.jsx', '.ts']
+    },
     entry: {
-        index: [
-            './index.js'
-        ]
+        index: './index.js'
     },
     output: {
-        path: path.resolve(__dirname, 'dist/Luban/server'),
+        path: path.resolve(__dirname, 'dist/Luban/src/server'),
         filename: '[name].js',
         libraryTarget: 'commonjs2'
     },
     optimization: {
-        // TerserPlugin@v1 uses a deprecated approach that causes Node.js 10 to print
-        // this warning to stderr:
-        //
-        // "Using a domain property in MakeCallback is deprecated. Use the async_context
-        // variant of MakeCallback or the AsyncResource class instead."
-        //
-        // For details: see
-        // https://www.bountysource.com/issues/72452391-fix-deprecation-warning
-        // and
-        // https://github.com/TNRIS/tnris.org/issues/9
-        //
-        // We explicitly specify to use terser-webpack-plugin@~2.3.5 to bypass the warning
-        minimizer: [new TerserPlugin()]
+        minimize: true,
+        minimizer: [new TerserPlugin()],
     },
     plugins: [
         new webpack.DefinePlugin({
@@ -74,7 +63,10 @@ module.exports = {
             },
             {
                 test: /\.ts$/,
-                loader: 'ts-loader'
+                loader: 'ts-loader',
+                options: {
+                    transpileOnly: true
+                }
             },
             {
                 test: /\.jsx?$/,
@@ -85,9 +77,6 @@ module.exports = {
         ]
     },
     externals: externals,
-    resolve: {
-        extensions: ['.js', '.json', '.jsx', '.ts']
-    },
     resolveLoader: {
         modules: [NODE_MODULES]
     },

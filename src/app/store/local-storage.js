@@ -11,13 +11,14 @@ const stores = {};
 
 // Check if code is running in Electron renderer process
 if (isElectron()) {
-    const electron = window.require('electron');
-    const app = electron.remote.app;
+    const { app } = window.require('@electron/remote');
     userData = {
         path: {
             'widget': path.join(app.getPath('userData'), 'widget.json'),
             'machine': path.join(app.getPath('userData'), 'machine.json'),
-            'printing': path.join(app.getPath('userData'), 'printing.json')
+            'printing': path.join(app.getPath('userData'), 'printing.json'),
+            'editor': path.join(app.getPath('userData'), 'editor.json'),
+            'downloadManager': path.join(app.getPath('userData'), 'downloadManager.json')
         }
     };
 }
@@ -83,6 +84,21 @@ const getLocalStore = (name) => {
 export const widgetStore = getLocalStore('widget');
 export const machineStore = getLocalStore('machine');
 export const printingStore = getLocalStore('printing');
+export const editorStore = getLocalStore('editor');
+export const downloadManagerStore = getLocalStore('downloadManager');
+// set a default saving path of download manager
+(async function () {
+    if (isElectron()) {
+        const fs = window.require('fs'); // Use window.require to require fs module in Electron
+        const os = window.require('os');
+        const homeDir = os.homedir();
+        const initSavePath = path.join(homeDir, 'Downloads');
+        if (!fs.existsSync(initSavePath) || !fs.statSync(initSavePath).isDirectory()) {
+            await fs.mkdir(initSavePath, { recursive: true }, err => console.error(err));
+        }
+        !downloadManagerStore.get('downloadManangerSavedPath') && downloadManagerStore.set('downloadManangerSavedPath', initSavePath);
+    }
+}());
 
 
 if (semver.gte(settings.version, '4.2.2')) {
@@ -90,7 +106,7 @@ if (semver.gte(settings.version, '4.2.2')) {
     if (printingCustomConfigs && Object.prototype.toString.call(printingCustomConfigs) === '[object String]') {
         const customConfigsArray = printingCustomConfigs.split('-');
         const excludeConfigs = ['retraction_enable', 'retract_at_layer_change', 'retraction_amount', 'retraction_speed', 'retraction_hop_enabled', 'retraction_hop'];
-        const modifiedCustomConfigs = customConfigsArray.filter(str => excludeConfigs.indexOf(str) === -1);
+        const modifiedCustomConfigs = customConfigsArray.filter((str) => excludeConfigs.indexOf(str) === -1);
         machineStore.set('printingCustomConfigs', modifiedCustomConfigs.join('-'));
     }
 }
@@ -99,13 +115,17 @@ const storeManager = {
     widgetStore,
     machineStore,
     printingStore,
+    editorStore,
+    downloadManagerStore,
     clear: () => {
         machineStore.clear();
         widgetStore.clear();
         printingStore.clear();
+        editorStore.clear();
+        downloadManagerStore.clear();
     },
     get: () => {
-        return _.merge(machineStore.get(), widgetStore.get(), printingStore.get());
+        return _.merge(machineStore.get(), widgetStore.get(), printingStore.get(), editorStore.get(), downloadManagerStore.get());
     }
 };
 export default storeManager;

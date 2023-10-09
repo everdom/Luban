@@ -1,21 +1,29 @@
-import path from 'path';
+import * as fs from 'fs-extra';
 import mv from 'mv';
-import fs from 'fs';
+import path from 'path';
 import { v4 as uuid } from 'uuid';
-import { pathWithRandomSuffix } from '../../lib/random-utils';
-import logger from '../../lib/logger';
-import DataStorage, { rmDir } from '../../DataStorage';
-import store from '../../store';
-import { PROTOCOL_TEXT } from '../../controllers/constants';
-import { parseLubanGcodeHeader } from '../../lib/parseGcodeHeader';
-import { zipFolder, unzipFile } from '../../lib/archive';
-import { packFirmware } from '../../lib/firmware-build';
+
+import { LEFT_EXTRUDER, RIGHT_EXTRUDER } from '../../../app/constants';
 import {
-    ERR_INTERNAL_SERVER_ERROR, HEAD_PRINTING, ERR_BAD_REQUEST
-} from '../../constants';
-import { DUAL_EXTRUDER_TOOLHEAD_FOR_SM2, getMachineSeriesWithToolhead, INITIAL_TOOL_HEAD_FOR_ORIGINAL, INITIAL_TOOL_HEAD_FOR_SM2 } from '../../../app/constants';
-import { removeSpecialChars } from '../../../shared/lib/utils';
+    findMachineByName,
+    getMachineToolHeadConfigPath,
+    isDualExtruder,
+} from '../../../app/constants/machines';
+import { SnapmakerA150Machine, SnapmakerA250Machine, SnapmakerA350Machine, SnapmakerOriginalExtendedMachine, SnapmakerOriginalMachine } from '../../../app/machines';
+import { printToolHead, standardCNCToolHead, standardLaserToolHead } from '../../../app/machines/snapmaker-2-toolheads';
+import { cncToolHeadOriginal, laserToolHeadOriginal, printToolHeadOriginal } from '../../../app/machines/snapmaker-original-toolheads';
 import { generateRandomPathName } from '../../../shared/lib/random-utils';
+import { removeSpecialChars } from '../../../shared/lib/utils';
+import DataStorage, { rmDir } from '../../DataStorage';
+import { ERR_BAD_REQUEST, ERR_INTERNAL_SERVER_ERROR, HEAD_CNC, HEAD_LASER, HEAD_PRINTING } from '../../constants';
+import { PROTOCOL_TEXT } from '../../controllers/constants';
+import { unzipFile, zipFolder } from '../../lib/archive';
+import { packFirmware } from '../../lib/firmware-build';
+import logger from '../../lib/logger';
+import { convertFileToSTL } from '../../lib/model-to-stl';
+import { parseLubanGcodeHeader } from '../../lib/parseGcodeHeader';
+import { pathWithRandomSuffix } from '../../lib/random-utils';
+import store from '../../store';
 
 const log = logger('api:file');
 
@@ -24,8 +32,10 @@ function copyFileSync(src, dst) {
         fs.copyFileSync(src, dst);
     }
 }
+
 function traverse(models, callback) {
     models.forEach(model => {
+        // callback && callback(model);
         if (model.children) {
             traverse(model.children, callback);
         } else {
@@ -34,23 +44,73 @@ function traverse(models, callback) {
     });
 }
 
-function getSeriesPathFromMachineInfo(machineInfo) {
-    let currentSeriesPath = '';
+function getFormalMachineIdentifier(machineIdentifier) {
+    switch (machineIdentifier) {
+        case 'A150':
+            return SnapmakerA150Machine.identifier;
+        case 'A250':
+            return SnapmakerA250Machine.identifier;
+        case 'A350':
+            return SnapmakerA350Machine.identifier;
+        default:
+            return machineIdentifier;
+    }
+}
+
+
+// Default tool heads for Snapmaker original
+export const INITIAL_SNAPMAKER_ORIGINAL_TOOL_HEAD_IDENTIFIER_MAP = {
+    printingToolhead:
+        printToolHeadOriginal.identifier,
+    laserToolhead: laserToolHeadOriginal.identifier,
+    cncToolhead: cncToolHeadOriginal.identifier,
+};
+
+export const INITIAL_SNAPMAKER_2_TOOL_HEAD_IDENTIFIER_MAP = {
+    printingToolhead: printToolHead.identifier,
+    laserToolhead: standardLaserToolHead.identifier,
+    cncToolhead: standardCNCToolHead.identifier,
+};
+
+function getDefaultToolHeadMap(machineIdentifier) {
+    switch (machineIdentifier) {
+        case SnapmakerOriginalMachine.identifier:
+        case SnapmakerOriginalExtendedMachine.identifier:
+            return INITIAL_SNAPMAKER_ORIGINAL_TOOL_HEAD_IDENTIFIER_MAP;
+        case SnapmakerA150Machine.identifier:
+        case SnapmakerA250Machine.identifier:
+        case SnapmakerA350Machine.identifier:
+            return INITIAL_SNAPMAKER_2_TOOL_HEAD_IDENTIFIER_MAP;
+        default:
+            return INITIAL_SNAPMAKER_ORIGINAL_TOOL_HEAD_IDENTIFIER_MAP;
+    }
+}
+
+function getConfigDir(machineInfo) {
+    let configPath = '';
+
     if (machineInfo) {
         const series = machineInfo?.series;
+        const machineIdentifier = getFormalMachineIdentifier(series);
+
         const headType = machineInfo?.headType;
-        const toolHead = machineInfo?.toolHead || (series === 'Original' ? INITIAL_TOOL_HEAD_FOR_ORIGINAL : INITIAL_TOOL_HEAD_FOR_SM2);
-        const currentMachine = getMachineSeriesWithToolhead(series, toolHead);
-        currentSeriesPath = currentMachine?.configPathname[headType];
+        const toolHeadIdentifierMap = machineInfo?.toolHead || getDefaultToolHeadMap(machineIdentifier);
+
+        const machine = findMachineByName(machineIdentifier);
+        if (machine) {
+            configPath = getMachineToolHeadConfigPath(machine, toolHeadIdentifierMap[`${headType}Toolhead`]);
+        } else {
+            log.warn(`Unable to find machine with identifier ${machineIdentifier}.`);
+        }
     }
-    return currentSeriesPath;
+
+    return path.join(DataStorage.configDir, configPath);
 }
 
 const cpFileToTmp = async (file, uploadName) => {
     const originalName = path.basename(file.name);
     uploadName = uploadName || originalName;
     const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
-
     return new Promise(resolve => {
         fs.copyFile(file.path, uploadPath, (err) => {
             if (err) {
@@ -67,40 +127,57 @@ const cpFileToTmp = async (file, uploadName) => {
 
 export const set = async (req, res) => {
     let { uploadName } = req.body;
-    const file = req.files.file;
-    if (file) { // post blob file in web
-        const originalName = removeSpecialChars(path.basename(file.name));
-        if (!uploadName) {
-            uploadName = generateRandomPathName(originalName);
-        }
-        uploadName = uploadName.toLowerCase();
+    const file = req.files.file || JSON.parse(req.body.file);
+    const headType = req.query.headType;
+    try {
+        if (file) { // post blob file/path string in web
+            let filename = file.name, filePath = file.path, children = [];
+            ({ filename, filePath, children = [] } = await convertFileToSTL(file, headType === 'printing'));
+            const originalName = removeSpecialChars(path.basename(filename));
+            if (!uploadName) {
+                uploadName = generateRandomPathName(originalName);
+            }
+            uploadName = uploadName.toLowerCase(); // Use all lower case filename
+            children.forEach((item) => {
+                item.parentUploadName = uploadName;
+            });
 
-        const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
-
-        mv(file.path, uploadPath, (err) => {
-            if (err) {
-                log.error(`Failed to upload file ${originalName}`);
-                res.status(ERR_INTERNAL_SERVER_ERROR).send({
-                    msg: `Failed to upload file ${originalName}: ${err}`
-                });
-            } else {
+            if (!file.fieldName) { // get path string
+                const cpRes = await cpFileToTmp(file, uploadName);
+                uploadName = cpRes.uploadName;
                 res.send({
                     originalName,
-                    uploadName
+                    uploadName,
+                    children
                 });
-                res.end();
+            } else { // get blob file
+                const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
+                mv(filePath, uploadPath, (err) => {
+                    if (err) {
+                        log.error(`Failed to upload file ${originalName}`);
+                        res.status(ERR_INTERNAL_SERVER_ERROR).send({
+                            msg: `Failed to upload file ${originalName}: ${err}`
+                        });
+                    } else {
+                        res.send({
+                            originalName,
+                            uploadName,
+                            children
+                        });
+                        res.end();
+                    }
+                });
             }
-        });
-    } else { // post file pathname in electron
-        try {
+        } else { // post file pathname in electron
             const ret = await cpFileToTmp(JSON.parse(req.body.file));
             res.send(ret);
             res.end();
-        } catch (err) {
-            res.status(ERR_INTERNAL_SERVER_ERROR).send({
-                msg: `Failed to upload file: ${err}`
-            });
         }
+    } catch (err) {
+        log.error(`Failed to upload file: ${err.message} - ${err.stack}`);
+        res.status(ERR_INTERNAL_SERVER_ERROR).send({
+            msg: `Failed to upload file: ${err}`
+        });
     }
 };
 /**
@@ -175,7 +252,10 @@ export const uploadCaseFile = (req, res) => {
  * @param res
  */
 export const uploadGcodeFile = async (req, res) => {
-    const file = req.files.file;
+    let file = req.files.file;
+    if (!file && req.body && typeof req.body.file === 'string') {
+        file = JSON.parse(req.body.file);
+    }
     let originalName, uploadName, uploadPath, originalPath;
     if (file) {
         originalPath = file.path;
@@ -272,16 +352,28 @@ export const uploadUpdateFile = (req, res) => {
 };
 
 /**
- * remove editor saved environment files
+ * get environment data from saved file
  */
-export const removeEnv = async (req, res) => {
+export const getEnv = async (req, res) => {
     const { headType } = req.body;
     const envDir = `${DataStorage.envDir}/${headType}`;
-    rmDir(envDir, false);
-    res.send(true);
-    res.end();
+    const targetPath = `${envDir}/config.json`;
+    try {
+        const exists = fs.existsSync(targetPath);
+        if (exists) {
+            const content = fs.readFileSync(targetPath).toString();
+            res.send({ result: 1, content });
+        } else {
+            res.send({ result: 0 });
+        }
+        res.end();
+    } catch (e) {
+        log.error(`Failed to get environment: ${e}`);
+        res.status(ERR_INTERNAL_SERVER_ERROR).send({
+            msg: `Failed to get environment: ${e}`
+        });
+    }
 };
-
 
 /**
  * save editor environment as files, and copy related resource files
@@ -290,12 +382,16 @@ export const saveEnv = async (req, res) => {
     const { content } = req.body;
     try {
         const config = JSON.parse(content);
+        const { activePresetIds } = config;
+
         const machineInfo = config?.machineInfo;
         const headType = machineInfo?.headType;
         const envDir = `${DataStorage.envDir}/${headType}`;
         // TODO: not just remove the category but only change the file when model changed
         rmDir(envDir, false);
-        const currentSeriesPath = getSeriesPathFromMachineInfo(machineInfo);
+
+        const configDir = getConfigDir(machineInfo);
+
         const result = await new Promise((resolve, reject) => {
             const targetPath = `${envDir}/config.json`;
             fs.writeFile(targetPath, content, (err) => {
@@ -322,13 +418,27 @@ export const saveEnv = async (req, res) => {
         });
 
         if (config.defaultMaterialId && /^material.([0-9_]+)$/.test(config.defaultMaterialId)) {
-            copyFileSync(`${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultMaterialId}.def.json`, `${envDir}/${config.defaultMaterialId}.def.json`);
+            copyFileSync(`${configDir}/${config.defaultMaterialId}.def.json`, `${envDir}/${config.defaultMaterialId}.def.json`);
         }
-        if (machineInfo?.toolHead?.printingToolhead === DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 && config.defaultMaterialIdRight && /^material.([0-9_]+)$/.test(config.defaultMaterialIdRight)) {
-            copyFileSync(`${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultMaterialIdRight}.def.json`, `${envDir}/${config.defaultMaterialIdRight}.def.json`);
+        const isDual = isDualExtruder(machineInfo?.toolHead?.printingToolhead);
+        if (isDual && config.defaultMaterialIdRight && /^material.([0-9_]+)$/.test(config.defaultMaterialIdRight)) {
+            copyFileSync(`${configDir}/${config.defaultMaterialIdRight}.def.json`, `${envDir}/${config.defaultMaterialIdRight}.def.json`);
         }
-        if (config.defaultQualityId && /^quality.([0-9_]+)$/.test(config.defaultQualityId)) {
-            copyFileSync(`${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultQualityId}.def.json`, `${envDir}/${config.defaultQualityId}.def.json`);
+
+        if (activePresetIds) {
+            for (const stackId of [LEFT_EXTRUDER, RIGHT_EXTRUDER]) {
+                const presetId = activePresetIds[stackId];
+                if (presetId && /^quality.([0-9_]+)$/.test(presetId)) {
+                    copyFileSync(`${configDir}/${presetId}.def.json`, `${envDir}/${presetId}.def.json`);
+                }
+            }
+        }
+        if (machineInfo?.headType === HEAD_CNC || machineInfo?.headType === HEAD_LASER) {
+            !!config.toolpaths?.length && config.toolpaths.forEach(toolpath => {
+                if (toolpath.toolParams?.definitionId && /^tool.([0-9_]+)$/.test(toolpath.toolParams.definitionId)) {
+                    copyFileSync(`${configDir}/${toolpath.toolParams.definitionId}.def.json`, `${envDir}/${toolpath.toolParams.definitionId}.def.json`);
+                }
+            });
         }
         res.send(result);
         res.end();
@@ -340,57 +450,43 @@ export const saveEnv = async (req, res) => {
     }
 };
 
-/**
- * get environment data from saved file
- */
-export const getEnv = async (req, res) => {
-    const { headType } = req.body;
-    const envDir = `${DataStorage.envDir}/${headType}`;
-    const targetPath = `${envDir}/config.json`;
-    try {
-        const exists = fs.existsSync(targetPath);
-        if (exists) {
-            const content = fs.readFileSync(targetPath).toString();
-            res.send({ result: 1, content });
-        } else {
-            res.send({ result: 0 });
-        }
-        res.end();
-    } catch (e) {
-        log.error(`Failed to get environment: ${e}`);
-        res.status(ERR_INTERNAL_SERVER_ERROR).send({
-            msg: `Failed to get environment: ${e}`
-        });
-    }
-};
+
 /**
  * recover environment saved resource files to tmp dir.
  */
 export const recoverEnv = async (req, res) => {
     try {
         const { content } = req.body;
-        const config = JSON.parse(content);
+        const config = JSON.parse(content); // TODO: envObj
+        const { activePresetIds } = config;
         const headType = config?.machineInfo?.headType;
         const envDir = `${DataStorage.envDir}/${headType}`;
 
-        const currentSeriesPath = getSeriesPathFromMachineInfo(config?.machineInfo);
+        const configDir = getConfigDir(config?.machineInfo);
 
         traverse(config.models, (model) => {
             const { originalName, uploadName } = model;
-
             copyFileSync(`${envDir}/${originalName}`, `${DataStorage.tmpDir}/${originalName}`);
             copyFileSync(`${envDir}/${uploadName}`, `${DataStorage.tmpDir}/${uploadName}`);
         });
 
+
         if (config.defaultMaterialId && /^material.([0-9_]+)$/.test(config.defaultMaterialId)) {
-            copyFileSync(`${envDir}/${config.defaultMaterialId}.def.json`, `${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultMaterialId}.def.json`);
+            copyFileSync(`${envDir}/${config.defaultMaterialId}.def.json`, `${configDir}/${config.defaultMaterialId}.def.json`);
         }
-        if (config.machineInfo?.toolHead?.printingToolhead === DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 && config.defaultMaterialIdRight && /^material.([0-9_]+)$/.test(config.defaultMaterialIdRight)) {
-            copyFileSync(`${envDir}/${config.defaultMaterialIdRight}.def.json`, `${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultMaterialIdRight}.def.json`);
+        const isDual = isDualExtruder(config.machineInfo?.toolHead?.printingToolhead);
+        if (isDual && config.defaultMaterialIdRight && /^material.([0-9_]+)$/.test(config.defaultMaterialIdRight)) {
+            copyFileSync(`${envDir}/${config.defaultMaterialIdRight}.def.json`, `${configDir}/${config.defaultMaterialIdRight}.def.json`);
         }
-        if (config.defaultQualityId && /^quality.([0-9_]+)$/.test(config.defaultQualityId)) {
-            copyFileSync(`${envDir}/${config.defaultQualityId}.def.json`, `${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultQualityId}.def.json`);
+
+        // recover quality presets
+        for (const stackId of [LEFT_EXTRUDER, RIGHT_EXTRUDER]) {
+            const presetId = activePresetIds[stackId];
+            if (presetId && /^quality.([0-9_]+)$/.test(presetId)) {
+                copyFileSync(`${envDir}/${presetId}.def.json`, `${configDir}/${presetId}.def.json`);
+            }
         }
+
         res.send({ result: 1 });
         res.end();
     } catch (e) {
@@ -401,6 +497,16 @@ export const recoverEnv = async (req, res) => {
     }
 };
 
+/**
+ * remove editor saved environment files
+ */
+export const removeEnv = async (req, res) => {
+    const { headType } = req.body;
+    const envDir = `${DataStorage.envDir}/${headType}`;
+    rmDir(envDir, false);
+    res.send(true);
+    res.end();
+};
 
 /**
  * package environment to zip file
@@ -452,18 +558,18 @@ export const uploadFileToTmp = (req, res) => {
 };
 
 export const recoverProjectFile = async (req, res) => {
+    const file = req.files.file || JSON.parse(req.body.file);
+
     try {
-        const file = req.files.file || JSON.parse(req.body.file);
-        // const toolHead = JSON.parse(req.body.toolHead);
         file.path = DataStorage.resolveRelativePath(file.path);
         const { uploadName } = await cpFileToTmp(file);
-        let content;
-        await unzipFile(`${uploadName}`, `${DataStorage.tmpDir}`);
-        content = fs.readFileSync(`${DataStorage.tmpDir}/config.json`);
 
-        content = content.toString();
+        await unzipFile(`${uploadName}`, `${DataStorage.tmpDir}`);
+        const buffer = fs.readFileSync(`${DataStorage.tmpDir}/config.json`);
+
+        const content = buffer.toString();
         const config = JSON.parse(content);
-        // const currentMachine = getMachineSeriesWithToolhead(config?.machineInfo?.series, toolHead);
+
         const machineInfo = config?.machineInfo;
         let headType = machineInfo?.headType;
         // TODO: for project file of "< version 4.1"
@@ -471,27 +577,64 @@ export const recoverProjectFile = async (req, res) => {
             headType = HEAD_PRINTING;
             machineInfo.headType = HEAD_PRINTING;
         }
-        const currentSeriesPath = getSeriesPathFromMachineInfo(machineInfo);
+        const configDir = getConfigDir(machineInfo);
 
         if (config.defaultMaterialId && /^material.([0-9_]+)$/.test(config.defaultMaterialId)) {
             const fname = `${DataStorage.tmpDir}/${config.defaultMaterialId}.def.json`;
             if (fs.existsSync(fname)) {
-                fs.copyFileSync(fname, `${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultMaterialId}.def.json`);
+                fs.copyFileSync(fname, path.join(configDir, `${config.defaultMaterialId}.def.json`));
             }
         }
-        if (config.defaultQualityId && /^quality.([0-9_]+)$/.test(config.defaultQualityId)) {
-            const fname = `${DataStorage.tmpDir}/${config.defaultQualityId}.def.json`;
+        if (config.defaultMaterialIdRight && /^material.([0-9_]+)$/.test(config.defaultMaterialIdRight)) {
+            const fname = `${DataStorage.tmpDir}/${config.defaultMaterialIdRight}.def.json`;
             if (fs.existsSync(fname)) {
-                fs.copyFileSync(fname, `${DataStorage.configDir}/${headType}/${currentSeriesPath}/${config.defaultQualityId}.def.json`);
+                fs.copyFileSync(fname, path.join(configDir, `${config.defaultMaterialIdRight}.def.json`));
             }
         }
 
-        res.send({ content, projectPath: file.path });
+        // Fallback to v4.4 quality preset key
+        let { activePresetIds } = config;
+        if (!activePresetIds) {
+            const { defaultQualityId } = config;
+            activePresetIds = {
+                [LEFT_EXTRUDER]: defaultQualityId,
+                [RIGHT_EXTRUDER]: '',
+            };
+
+            config.activePresetIds = activePresetIds;
+        }
+
+        for (const stackId of [LEFT_EXTRUDER, RIGHT_EXTRUDER]) {
+            const presetId = activePresetIds[stackId];
+            if (presetId && /^quality.([0-9_]+)$/.test(presetId)) {
+                const filePath = `${DataStorage.tmpDir}/${presetId}.def.json`;
+                if (fs.existsSync(filePath)) {
+                    fs.copyFileSync(filePath, `${configDir}/${presetId}.def.json`);
+                }
+            }
+        }
+        if (headType === HEAD_LASER || headType === HEAD_CNC) {
+            config.toolpaths?.length && config.toolpaths.forEach(toolpath => {
+                if (toolpath?.toolParams?.definitionId && /^tool.([0-9_]+)$/.test(toolpath?.toolParams?.definitionId)) {
+                    const fname = `${DataStorage.tmpDir}/${toolpath.toolParams.definitionId}.def.json`;
+                    if (fs.existsSync(fname)) {
+                        fs.copyFileSync(fname, `${configDir}/${toolpath.toolParams.definitionId}.def.json`);
+                    }
+                }
+            });
+        }
+
+        res.send({
+            projectPath: file.path,
+            content: JSON.stringify(config), // unwrap config
+        });
         res.end();
     } catch (e) {
-        log.error(`Failed to recover file: ${e}`);
+        log.error(`Failed to recover from project file: ${file.path}`);
+        log.error(e);
+
         res.status(ERR_INTERNAL_SERVER_ERROR).send({
-            msg: `Failed to recover file: ${e}`
+            msg: `Failed to recover from project file: ${e}`,
         });
     }
 };

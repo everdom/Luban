@@ -1,0 +1,31 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "rootDir": ".",
+        "baseUrl": ".",
+        "resolveJsonModule": true,
+        "outDir": "./output",
+        "sourceMap": false,
+        "inlineSourceMap": false,
+        "allowJs": true,
+        "target": "ESNext",
+        "noUnusedLocals": true,
+        "esModuleInterop": true,
+        "watch": false,
+        "skipLibCheck": true,
+
+        "paths": {
+            "@snapmaker/luban-platform": [
+                "output/packages/luban-platform"
+            ]
+        }
+    },
+    "include": [
+        "src/server/**/*",
+        "src/shared/**/*",
+        "node_modules/@snapmaker/luban-platform/**/*",
+    ],
+    "exclude": [
+        "./src/app/**/*",
+    ],
+}

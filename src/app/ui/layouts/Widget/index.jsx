@@ -3,7 +3,7 @@
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
 import _ from 'lodash';
-
+import classNames from 'classnames';
 import { connect } from 'react-redux';
 import Widget from '../../components/Widget';
 import SvgIcon from '../../components/SvgIcon';
@@ -21,7 +21,6 @@ class WidgetContainer extends PureComponent {
         // function|object, some component is wraped with connect/withRouter
         component: PropTypes.any.isRequired,
         widgetId: PropTypes.string.isRequired,
-        headType: PropTypes.string,
         widgetProps: PropTypes.object.isRequired,
         onRemove: PropTypes.func,
         onToggle: PropTypes.func,
@@ -74,6 +73,7 @@ class WidgetContainer extends PureComponent {
     render() {
         // const { component: Component, minimized, fullscreen } = this.props;
         const { widgetId, component: Component, minimized, fullscreen, widgetProps, controlActions } = this.props;
+
         const state = {
             title: this.state.title,
             minimized: minimized,
@@ -83,43 +83,52 @@ class WidgetContainer extends PureComponent {
         const actions = this.actions;
         return (
             <Widget
-                style={{ display: this.state.display ? '' : 'none', margin: '16px 16px 0' }}
-                className="border-bottom-normal padding-bottom-16"
+                className={classNames(
+                    'padding-bottom-16',
+                    {
+                        'border-bottom-normal': !['toolpath-list', 'laser-params'].includes(widgetId),
+                    }
+                )}
+                style={{
+                    display: this.state.display ? 'block' : 'none',
+                    margin: '16px',
+                }}
                 fullscreen={state.fullscreen}
             >
-                <div className="sm-flex height-32 justify-space-between">
-                    <span className="sm-flex-width heading-3">{i18n._(state.title)}</span>
-                    <div>
-                        {state.buttons && _.isArray(state.buttons) && state.buttons.map(v => {
-                            if (typeof v === 'object') {
-                                const { disabled = false, title = '', onClick, className = '', name = 'CopyNomral', type = ['hoverNormal', 'pressNormal'] } = v;
-                                return (
-                                    <SvgIcon
-                                        key={title}
-                                        disabled={disabled}
-                                        name={name}
-                                        className={className}
-                                        title={i18n._(title)}
-                                        onClick={onClick}
-                                        type={type}
-                                    />
-                                );
-                            } else if (v === 'SMMinimize') {
-                                return (
-                                    <SMMinimizeButton
-                                        key="SMMinimize"
-                                        className="margin-left-4"
-                                        state={state}
-                                        actions={actions}
-                                    />
-                                );
-                            }
-                            return null;
-                        })}
+                {state.title && (
+                    <div className="sm-flex height-32 justify-space-between">
+                        <span className="sm-flex-width heading-3">{i18n._(state.title)}</span>
+                        <div>
+                            {state.buttons && _.isArray(state.buttons) && state.buttons.map(v => {
+                                if (typeof v === 'object') {
+                                    const { disabled = false, title = '', onClick, className = '', name = 'CopyNomral', type = ['hoverNormal', 'pressNormal'] } = v;
+                                    return (
+                                        <SvgIcon
+                                            key={title}
+                                            disabled={disabled}
+                                            name={name}
+                                            className={className}
+                                            title={i18n._(title)}
+                                            onClick={onClick}
+                                            type={type}
+                                        />
+                                    );
+                                } else if (v === 'SMMinimize') {
+                                    return (
+                                        <SMMinimizeButton
+                                            key="SMMinimize"
+                                            className="margin-left-4"
+                                            state={state}
+                                            actions={actions}
+                                        />
+                                    );
+                                }
+                                return null;
+                            })}
+                        </div>
                     </div>
-                </div>
+                )}
                 <Widget.Content style={{ display: state.minimized ? 'none' : 'block', padding: '0', border: 'none' }}>
-
                     <Component
                         isWidget
                         widgetActions={this.actions}
@@ -134,13 +143,6 @@ class WidgetContainer extends PureComponent {
 
                     />
                 </Widget.Content>
-                {/* {WrappedFooter && (
-                    <Widget.Footer>
-                        <WrappedFooter
-                            headType={headType}
-                        />
-                    </Widget.Footer>
-                )} */}
             </Widget>
         );
     }

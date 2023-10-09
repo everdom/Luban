@@ -64,6 +64,7 @@ class MarlinReplyParserSeries {
         if (!r) {
             return null;
         }
+
         return {
             type: MarlinReplyParserSeries,
             payload: {
@@ -94,14 +95,14 @@ class MarlinReplyParserSeriesSize {
 
 class MarlinReplyParserHeadStatus {
     static parse(line) {
-        const r = line.match(/^Current Status: (.*)$/);
+        const r = line.match(/^Current Status: (ON|OFF)$/);
         if (!r) {
             return null;
         }
         return {
             type: MarlinReplyParserHeadStatus,
             payload: {
-                headStatus: parseFloat(r[1])
+                headStatus: r[1] === 'ON'
             }
         };
     }
@@ -863,7 +864,7 @@ class Marlin extends events.EventEmitter {
         enclosureLight: 0,
         enclosureFan: 0,
 
-        airPurifier: true,
+        airPurifier: false,
         airPurifierSwitch: false,
         airPurifierFanSpeed: 3,
         airPurifierFilterHealth: 2,

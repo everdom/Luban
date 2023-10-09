@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { includes } from 'lodash';
+import { includes, isNil, isUndefined, orderBy } from 'lodash';
 import DataStorage from '../DataStorage';
 import pkg from '../../package.json';
 import logger from '../lib/logger';
@@ -9,119 +9,52 @@ import { ConfigV1Regex, ConfigV1Suffix } from '../constants';
 const log = logger('service:definition');
 
 const SETTING_FIELDS = [
-    'label', 'description', 'type', 'options', 'unit', 'enabled', 'default_value', 'value', 'enabled',
-    'min', 'max',
+    'label', 'description', 'type', 'options', 'unit', 'enabled', 'default_value', 'value', 'visible', 'calcu_value',
+    'min', 'max', 'limit_to_extruder',
     // Snapmaker extended fields:
     'sm_value'
 ];
-
-const DEFAULT_PRINTING_MATERIAL = [
-    'material.pla.def.json',
-    'material.pla.black.def.json',
-    'material.pla.blue.def.json',
-    'material.pla.grey.def.json',
-    'material.pla.red.def.json',
-    'material.pla.yellow.def.json',
-    'material.abs.def.json',
-    'material.abs.black.def.json',
-    'material.petg.def.json',
-    'material.petg.black.def.json',
-    'material.petg.red.def.json',
-    'material.petg.blue.def.json',
-];
-
-const DEFAULT_PREDEFINED = {
-    'printing': [
-        'quality.fast_print.def.json',
-        'quality.normal_quality.def.json',
-        'quality.high_quality.def.json',
-        'material.pla.def.json',
-        'material.pla.black.def.json',
-        'material.pla.blue.def.json',
-        'material.pla.grey.def.json',
-        'material.pla.red.def.json',
-        'material.pla.yellow.def.json',
-        'material.abs.def.json',
-        'material.abs.black.def.json',
-        'material.petg.def.json',
-        'material.petg.black.def.json',
-        'material.petg.red.def.json',
-        'material.petg.blue.def.json',
-    ],
-    'cnc': [
-        'tool.default_CVbit.def.json',
-        'tool.default_FEM1.5.def.json',
-        'tool.default_FEM3.175.def.json',
-        'tool.default_MBEM.def.json',
-        'tool.default_SGVbit.def.json',
-        'tool.rAcrylic_FEM1.5.def.json',
-        'tool.rEpoxy_SGVbit.def.json'
-    ],
-    'laser': [
-        'present.default_CUT.def.json',
-        'present.default_HDFill.def.json',
-        'present.default_SDFill.def.json',
-        'present.default_PathEngrave.def.json',
-        'basswood.cutting_1.5mm.def.json',
-        'basswood.dot_filled_engraving.def.json',
-        'black_acrylic.cutting_3mm.def.json',
-        'mdf.dot_filled_engraving.def.json',
-        'basswood.line_filled_engraving.def.json',
-        'mdf.line_filled_engraving.def.json',
-        'basswood.vector_engraving.def.json',
-        'mdf.vector_engraving.def.json'
-    ],
-    '10w-laser': [
-        'basswood.cutting_1.5mm.def.json',
-        'basswood.cutting_3mm.def.json',
-        'basswood.cutting_5mm.def.json',
-        'basswood.cutting_8mm.def.json',
-        'basswood.vector_engraving.def.json',
-        'basswood.dot_filled_engraving.def.json',
-        'basswood.line_filled_engraving.def.json',
-        'black_acrylic.cutting_2mm.def.json',
-        'black_acrylic.cutting_3mm.def.json',
-        'black_acrylic.cutting_5mm.def.json',
-        'black_anodized_aluminum.line_filled_engraving.def.json',
-        'black_anodized_aluminum.vector_engraving.def.json',
-        'cardstock.cutting_200g.def.json',
-        'cardstock.cutting_300g.def.json',
-        'cardstock.cutting_350g.def.json',
-        'coated_paper.cutting_200g.def.json',
-        'coated_paper.cutting_300g.def.json',
-        'coated_paper.cutting_350g.def.json',
-        'corrugated_paper.cutting_1.6mm.def.json',
-        'corrugated_paper.cutting_3mm.def.json',
-        'crazy_horse_leather.cutting_2mm.def.json',
-        'crazy_horse_leather.dot_filled_engraving.def.json',
-        'crazy_horse_leather.line_filled_engraving.def.json',
-        'crazy_horse_leather.vector_engraving.def.json',
-        'mdf.cutting_2mm.def.json',
-        'mdf.cutting_3mm.def.json',
-        'mdf.dot_filled_engraving.def.json',
-        'mdf.line_filled_engraving.def.json',
-        'mdf.vector_engraving.def.json',
-        'pinewood.cutting_4mm.def.json',
-        'pinewood.cutting_8mm.def.json',
-        'pinewood.dot_filled_engraving.def.json',
-        'pinewood.line_filled_engraving.def.json',
-        'vegetable_tanned_leather.cutting_1.5mm.def.json',
-        'vegetable_tanned_leather.cutting_2mm.def.json',
-        'vegetable_tanned_leather.dot_filled_engraving.def.json',
-        'vegetable_tanned_leather.line_filled_engraving.def.json'
-    ]
+const allSettingNameWithType = {
+    'material': new Set(),
+    'quality': new Set()
 };
+
+allSettingNameWithType.quality.add('machine_nozzle_size');
+
+allSettingNameWithType.quality.add('extruders_enabled_count');
+allSettingNameWithType.material.add('extruders_enabled_count');
+
+const materialRegex = /^material.*/;
+const qualityRegex = /^quality.*/;
+
+const DEFAULT_PREDEFINED_ID = {
+    'printing': 'quality.fast_print.def.json',
+    'cnc': 'tool.default_CVbit.def.json',
+    'laser': 'present.default_CUT.def.json',
+    '10w-laser': 'basswood.cutting_1.5mm.def.json'
+};
+const extruderProfileArr = new Set();
+
+const materialProfileArr = new Set();
+
+const qualityProfileArr = new Set();
+
+const printingProfileLevel = {};
+
+// [category: string]: Array<string>
+// category -> category keys
+const materialProfileLevel = {};
 
 export class DefinitionLoader {
     definitionId = '';
 
     name = '';
     // default name key
-    // i18nName = undefined;
+    i18nName = '';
 
     category = '';
     // default category key
-    // i18nCategory = undefined;
+    i18nCategory = '';
 
     inherits = '';
 
@@ -131,13 +64,23 @@ export class DefinitionLoader {
 
     metadata = {};
 
+    isRecommended = false;
+
+    /**
+     * Load definition with ID {definitionId}.
+     *
+     * @param headType
+     * @param definitionId
+     * @param configPath
+     */
     loadDefinition(headType, definitionId, configPath) {
         if (!this.definitionId) {
             this.definitionId = definitionId;
         }
+
         const suffix = ConfigV1Suffix;
-        const filePath = configPath ? path.join(`${DataStorage.configDir}/${headType}/${configPath}`,
-            `${definitionId}${suffix}`)
+        const filePath = configPath
+            ? path.join(`${DataStorage.configDir}/${configPath}`, `${definitionId}${suffix}`)
             : path.join(`${DataStorage.configDir}/${headType}`, `${definitionId}${suffix}`);
 
         // in case of JSON parse error, set default json inherits from snapmaker2.def.json
@@ -150,8 +93,11 @@ export class DefinitionLoader {
             const data = fs.readFileSync(filePath, 'utf8');
             json = JSON.parse(data);
             this.loadJSON(headType, definitionId, json);
+            return true;
         } catch (e) {
-            log.error(`JSON Syntax error of: ${definitionId}`);
+            log.error(`Failed to read JSON file: ${filePath}`);
+            log.error(e);
+            return false;
         }
     }
 
@@ -160,8 +106,8 @@ export class DefinitionLoader {
             this.definitionId = definitionId;
         }
         const suffix = ConfigV1Suffix;
-        const filePath = configPath ? path.join(`${DataStorage.defaultConfigDir}/${headType}/${configPath}`,
-            `${definitionId}${suffix}`)
+        const filePath = configPath
+            ? path.join(`${DataStorage.defaultConfigDir}/${configPath}`, `${definitionId}${suffix}`)
             : path.join(`${DataStorage.defaultConfigDir}/${headType}`, `${definitionId}${suffix}`);
 
         // in case of JSON parse error, set default json inherits from snapmaker2.def.json
@@ -174,8 +120,10 @@ export class DefinitionLoader {
             const data = fs.readFileSync(filePath, 'utf8');
             json = JSON.parse(data);
             this.loadJSON(headType, definitionId, json);
+            return true;
         } catch (e) {
             log.error(`Default JSON Syntax error of: ${definitionId}`);
+            return false;
         }
     }
 
@@ -205,6 +153,15 @@ export class DefinitionLoader {
         if (json.i18nCategory) {
             this.i18nCategory = json.i18nCategory;
         }
+        if (json.typeOfPrinting) {
+            this.typeOfPrinting = json.typeOfPrinting;
+        }
+        if (json.qualityType) {
+            this.qualityType = json.qualityType;
+        }
+        if (!isNil(json.isRecommended)) {
+            this.isRecommended = json.isRecommended;
+        }
 
         // settings
         if (json.settings) {
@@ -216,38 +173,135 @@ export class DefinitionLoader {
         }
     }
 
-    loadJSONSettings(definitionId, json) {
-        for (const key of Object.keys(json)) {
-            const setting = json[key];
+    loadJSONSettings(definitionId, json, zIndex = -2, parentKey, _mainCategory, _smallCategory) {
+        zIndex++;
+        let mainCategory = _mainCategory;
+        let smallCategory = _smallCategory;
+        if (definitionId === 'snapmaker_modify_0') {
+            for (const key of Object.keys(json)) {
+                const setting = json[key];
+                if (setting.type === 'mainCategory') {
+                    mainCategory = key;
+                } else if (setting.type === 'category') {
+                    smallCategory = key;
+                } else {
+                    this.settings[key] = this.settings[key] || {};
+                    this.settings[key].childKey = this.settings[key].childKey || [];
+                    this.settings[key].from = definitionId;
+                    this.settings[key].isLeave = (setting.children === undefined);
+                    this.settings[key].filter = this.settings[key].filter ? this.settings[key].filter : (setting.filter || ['all']);
 
-            if (setting.type !== 'category') {
-                this.settings[key] = this.settings[key] || {};
-                this.settings[key].from = definitionId;
-                this.settings[key].isLeave = (setting.children === undefined);
+                    const isMesh = setting.settable_per_mesh || false;
+                    const isExtruder = setting.settable_per_extruder || false;
+                    this.settings[key].settable_per_extruder = this.settings[key].settable_per_extruder || isExtruder;
+                    this.settings[key].settable_per_mesh = this.settings[key].settable_per_mesh || isMesh;
 
-                if (definitionId === this.definitionId && !this.ownKeys.has(key)) {
-                    this.ownKeys.add(key);
-                }
+                    if (mainCategory === 'material' && zIndex === 1) {
+                        materialProfileLevel[smallCategory] = materialProfileLevel[smallCategory] || [];
+                        if (!includes(materialProfileLevel[smallCategory], key)) {
+                            materialProfileLevel[smallCategory] = materialProfileLevel[smallCategory].concat(key);
+                        }
+                    } else if (mainCategory === 'quality' && zIndex === 1) {
+                        printingProfileLevel[smallCategory] = printingProfileLevel[smallCategory] || [];
+                        if (!includes(printingProfileLevel[smallCategory], key)) {
+                            printingProfileLevel[smallCategory] = printingProfileLevel[smallCategory].concat(key);
+                        }
+                    }
+                    if (parentKey && !includes(this.settings[parentKey].childKey, key)) {
+                        this.settings[parentKey].childKey = this.settings[parentKey].childKey.concat(key);
+                    }
+                    if (definitionId === this.definitionId && !this.ownKeys.has(key)) {
+                        this.ownKeys.add(key);
+                    }
 
-                for (const field of SETTING_FIELDS) {
-                    if (setting[field] !== undefined) {
-                        this.settings[key][field] = setting[field];
+                    // read regular fields and overwrite
+                    for (const field of SETTING_FIELDS) {
+                        if (setting[field] !== undefined) {
+                            this.settings[key][field] = setting[field];
+                        }
+                    }
+                    if (mainCategory === 'quality') {
+                        qualityProfileArr.add(key);
+                        allSettingNameWithType[mainCategory].add(key);
+                    }
+                    if (mainCategory === 'material') {
+                        materialProfileArr.add(key);
+                        extruderProfileArr.add(key);
+                        allSettingNameWithType[mainCategory].add(key);
+                    }
+                    // extruder parameters could come from both quality & material main categories
+                    if (setting.settable_per_extruder) {
+                        extruderProfileArr.add(key);
+                    }
+                    if (setting.limit_to_extruder) {
+                        extruderProfileArr.add(key);
+                    }
+                    if (isUndefined(this.settings[key].zIndex)) {
+                        this.settings[key].zIndex = zIndex;
                     }
                 }
+
+                if (setting.children) {
+                    this.loadJSONSettings(
+                        definitionId,
+                        setting.children,
+                        zIndex,
+                        (setting.type === 'category' || setting.type === 'mainCategory') ? '' : key,
+                        mainCategory,
+                        smallCategory,
+                    );
+                }
             }
-            if (setting.children) {
-                this.loadJSONSettings(definitionId, setting.children);
+            zIndex--;
+        } else {
+            for (const key of Object.keys(json)) {
+                const setting = json[key];
+                if (setting.type !== 'category') {
+                    this.settings[key] = this.settings[key] || {};
+                    this.settings[key].from = definitionId;
+                    this.settings[key].isLeave = (setting.children === undefined);
+
+                    if (definitionId === 'fdmextruder') {
+                        const isMesh = setting.settable_per_mesh || false;
+                        const isExtruder = setting.settable_per_extruder || false;
+                        this.settings[key].settable_per_extruder = this.settings[key].settable_per_extruder || isExtruder;
+                        this.settings[key].settable_per_mesh = this.settings[key].settable_per_mesh || isMesh;
+                    }
+
+                    if (definitionId === this.definitionId && !this.ownKeys.has(key)) {
+                        this.ownKeys.add(key);
+                    }
+
+                    for (const field of SETTING_FIELDS) {
+                        if (setting[field] !== undefined) {
+                            this.settings[key][field] = setting[field];
+                        }
+                    }
+
+                    if (definitionId === 'fdmextruder') {
+                        extruderProfileArr.add(key);
+                    }
+                }
+                if (setting.children) {
+                    this.loadJSONSettings(definitionId, setting.children);
+                }
             }
         }
     }
 
     toJSON() {
         const overrides = {};
-
+        if (materialRegex.test(this.definitionId)) {
+            this.ownKeys = allSettingNameWithType.material;
+        } else if (qualityRegex.test(this.definitionId)) {
+            this.ownKeys = allSettingNameWithType.quality;
+        }
         for (const key of this.ownKeys) {
-            overrides[key] = {
-                default_value: this.settings[key].default_value
-            };
+            if (this.settings[key]) {
+                overrides[key] = {
+                    default_value: this.settings[key].default_value
+                };
+            }
         }
 
         return {
@@ -256,6 +310,9 @@ export class DefinitionLoader {
             category: this.category,
             i18nName: this.i18nName,
             i18nCategory: this.i18nCategory,
+            typeOfPrinting: this.typeOfPrinting,
+            qualityType: this.qualityType,
+            isRecommended: this.isRecommended,
             inherits: this.inherits,
             metadata: this.metadata,
             overrides
@@ -266,13 +323,16 @@ export class DefinitionLoader {
         return {
             definitionId: this.definitionId,
             name: this.name,
-            category: this.category,
             i18nName: this.i18nName,
+            isRecommended: this.isRecommended,
+            category: this.category,
             i18nCategory: this.i18nCategory,
             inherits: this.inherits,
             settings: this.settings,
             metadata: this.metadata,
-            ownKeys: Array.from(this.ownKeys)
+            typeOfPrinting: this.typeOfPrinting,
+            qualityType: this.qualityType,
+            ownKeys: Array.from(this.ownKeys),
         };
     }
 
@@ -282,6 +342,8 @@ export class DefinitionLoader {
         this.category = object.category;
         this.i18nCategory = object.i18nCategory;
         this.inherits = object.inherits;
+        this.typeOfPrinting = object.typeOfPrinting;
+        this.qualityType = object.qualityType;
         this.ownKeys = new Set(object.ownKeys);
         this.settings = object.settings;
         this.metadata = object.metadata;
@@ -303,9 +365,11 @@ export class DefinitionLoader {
         this.i18nCategory = i18nCategory;
     }
 
-    updateSettings(settings) {
-        for (const key of Object.keys(settings)) {
-            this.ownKeys.add(key);
+    updateSettings(settings, shouldAddOwnKeys = true) {
+        if (shouldAddOwnKeys) {
+            for (const key of Object.keys(settings)) {
+                this.ownKeys.add(key);
+            }
         }
         this.settings = {
             ...this.settings,
@@ -314,8 +378,8 @@ export class DefinitionLoader {
     }
 }
 
-function writeDefinition(headType, filename, series, definitionLoader) {
-    const filePath = path.join(DataStorage.configDir, headType, series, filename);
+function writeDefinition(filename, configPath, definitionLoader) {
+    const filePath = path.join(DataStorage.configDir, configPath, filename);
     fs.writeFile(filePath, JSON.stringify(definitionLoader.toJSON(), null, 2), 'utf8', (err) => {
         if (err) {
             log.error(`Failed to write definition: err=${JSON.stringify(err)}`);
@@ -323,6 +387,18 @@ function writeDefinition(headType, filename, series, definitionLoader) {
     });
 }
 
+
+/**
+ * Load Definition by filename.
+ *
+ * TODO: Deal with load failure
+ *
+ * @param headType
+ * @param filename
+ * @param configPath
+ * @param isDefault
+ * @returns {DefinitionLoader}
+ */
 export function loadDefinitionLoaderByFilename(headType, filename, configPath, isDefault = false) {
     let definitionId = '';
     if (ConfigV1Regex.test(filename)) {
@@ -330,147 +406,112 @@ export function loadDefinitionLoaderByFilename(headType, filename, configPath, i
     }
     const definitionLoader = new DefinitionLoader();
     if (isDefault) {
-        definitionLoader.loadDefaultDefinition(headType, definitionId, configPath);
+        const success = definitionLoader.loadDefaultDefinition(headType, definitionId, configPath);
+        if (!success) {
+            return null;
+        }
     } else {
-        definitionLoader.loadDefinition(headType, definitionId, configPath);
+        const success = definitionLoader.loadDefinition(headType, definitionId, configPath);
+        if (!success) {
+            return null;
+        }
     }
 
     return definitionLoader;
 }
 
-// TODO: merge 'loadMaterialDefinitions' and 'loadQualityDefinitions' function
-export function loadMaterialDefinitions(headType, configPath) {
-    const predefined = DEFAULT_PRINTING_MATERIAL;
+export function loadDefinitionsByRegex(headType, configPath, regex, defaultId) {
+    const defaultDefinitionLoader = loadDefinitionLoaderByFilename(headType, defaultId, configPath);
 
-    const regex = /^material\.([A-Za-z0-9_]+).([A-Za-z0-9_]+?)\.def\.json$/;
-    const defaultDefinitionLoader = loadDefinitionLoaderByFilename(headType, 'material.pla.def.json', configPath);
-    // predefined.push('material.pla.def.json');
-    // predefined.push('material.abs.def.json');
-    // predefined.push('material.petg.def.json');
+    const configDir = path.join(DataStorage.configDir, configPath);
 
-    const configDir = `${DataStorage.configDir}/${headType}`;
-    let defaultFilenames = [];
-    try {
-        defaultFilenames = fs.readdirSync(`${configDir}/${configPath}`);
-    } catch (e) {
-        log.error(e);
-    }
-    // Load pre-defined definitions first
-    const definitions = [];
-    for (const filename of predefined) {
-        if (includes(defaultFilenames, filename)) {
-            const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath);
-            definitions.push(definitionLoader.toObject());
-        }
-    }
-
-    for (const filename of defaultFilenames) {
-        if (!includes(predefined, filename) && regex.test(filename)) {
-            const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath);
-            if (defaultDefinitionLoader) {
-                const ownKeys = Array.from(defaultDefinitionLoader.ownKeys).filter(e => !definitionLoader.ownKeys.has(e));
-                if (ownKeys && ownKeys.length > 0) {
-                    for (const ownKey of ownKeys) {
-                        definitionLoader.ownKeys.add(ownKey);
-                    }
-                    writeDefinition(headType, filename, configPath, definitionLoader);
-                }
-            }
-            definitions.push(definitionLoader.toObject());
-        }
-    }
-
-    return definitions;
-}
-
-export function loadQualityDefinitions(headType, configPath) {
-    const predefined = [];
-    const regex = /^quality.([A-Za-z0-9_]+).def.json$/;
-    const defaultDefinitionLoader = loadDefinitionLoaderByFilename(headType, 'quality.fast_print.def.json', configPath);
-    predefined.push('quality.fast_print.def.json');
-    predefined.push('quality.normal_quality.def.json');
-    predefined.push('quality.high_quality.def.json');
-
-    const configDir = `${DataStorage.configDir}/${headType}`;
-    let defaultFilenames = [];
-    try {
-        defaultFilenames = fs.readdirSync(`${configDir}/${configPath}`);
-    } catch (e) {
-        log.error(e);
-    }
-    // Load pre-defined definitions first
-    const definitions = [];
-    for (const filename of predefined) {
-        if (includes(defaultFilenames, filename)) {
-            const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath);
-            definitions.push(definitionLoader.toObject());
-        }
-    }
-
-    for (const filename of defaultFilenames) {
-        if (!includes(predefined, filename) && regex.test(filename)) {
-            const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath);
-            if (defaultDefinitionLoader) {
-                const ownKeys = Array.from(defaultDefinitionLoader.ownKeys).filter(e => !definitionLoader.ownKeys.has(e));
-                if (ownKeys && ownKeys.length > 0) {
-                    for (const ownKey of ownKeys) {
-                        definitionLoader.ownKeys.add(ownKey);
-                    }
-                    writeDefinition(headType, filename, configPath, definitionLoader);
-                }
-            }
-            definitions.push(definitionLoader.toObject());
-        }
-    }
-
-    return definitions;
-}
-
-export function loadDefinitionsByPrefixName(headType, prefix, configPath) {
-    if (prefix === 'material') {
-        return loadMaterialDefinitions(headType, configPath);
-    } else if (prefix === 'quality') {
-        return loadQualityDefinitions(headType, configPath);
-    } else {
+    if (!fs.existsSync(configDir)) {
         return [];
     }
+
+    const filenames = fs.readdirSync(configDir);
+
+    const definitions = [];
+    for (const filename of filenames) {
+        if (!regex.test(filename)) {
+            continue;
+        }
+
+        const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath);
+        if (!definitionLoader) {
+            continue;
+        }
+
+        // add own keys
+        // Correct definition
+        // TODO: Maybe add this to migration, not here...
+        if (defaultDefinitionLoader && !definitionLoader.isRecommended && definitionLoader.name) {
+            const ownKeys = Array.from(defaultDefinitionLoader.ownKeys).filter(e => !definitionLoader.ownKeys.has(e));
+            if (ownKeys && ownKeys.length > 0) {
+                for (const ownKey of ownKeys) {
+                    definitionLoader.ownKeys.add(ownKey);
+                }
+                writeDefinition(filename, configPath, definitionLoader);
+            }
+        }
+
+        definitions.push(definitionLoader.toObject());
+    }
+
+    if (headType === 'printing') {
+        return orderBy(definitions, ['isRecommended', 'category'], ['asc', 'desc']);
+    }
+    return definitions;
 }
 
-export function loadAllSeriesDefinitions(isDefault = false, headType, series = 'A150') {
+
+export function loadDefinitionsByPrefixName(headType, prefix = 'material', configPath) {
+    let defaultId;
+    /* eslint-disable-next-line */
+    const regex = new RegExp(`^${prefix}\.([A-Za-z0-9_]+)\.(([A-Za-z0-9_\.]+)?)def\.json$`);
+    if (prefix === 'material') {
+        defaultId = 'material.pla.def.json';
+    } else if (prefix === 'quality') {
+        defaultId = 'quality.fast_print.def.json';
+    }
+    return loadDefinitionsByRegex(headType, configPath, regex, defaultId);
+}
+
+export function loadAllSeriesDefinitions(isDefault = false, headType, configPath = 'A150') {
     // TODO: series name?
-    const _headType = (headType === 'laser' && includes(series, '10w')) ? '10w-laser' : headType;
-    const predefined = DEFAULT_PREDEFINED[_headType];
+    const _headType = (headType === 'laser' && includes(configPath, '10w')) ? '10w-laser' : headType;
+    const predefined = DEFAULT_PREDEFINED_ID[_headType];
     const definitions = [];
 
-    const configDir = isDefault ? `${DataStorage.defaultConfigDir}/${headType}`
-        : `${DataStorage.configDir}/${headType}`;
+    const configDir = isDefault ? `${DataStorage.defaultConfigDir}/${configPath}` : `${DataStorage.configDir}/${configPath}`;
     let defaultFilenames = [];
     try {
-        defaultFilenames = fs.readdirSync(`${configDir}/${series}`);
+        defaultFilenames = fs.readdirSync(configDir);
     } catch (e) {
+        log.error(`Failed to load files in folder ${configDir}`);
         log.error(e);
     }
 
     if (isDefault) {
-        for (const filename of predefined) {
-            if (includes(defaultFilenames, filename)) {
-                const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, series, isDefault);
+        for (const filename of defaultFilenames) {
+            if (filename !== 'machine.def.json' && ConfigV1Regex.test(filename)) {
+                const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath, isDefault);
                 definitions.push(definitionLoader.toObject());
             }
         }
     } else {
-        const defaultDefinitionLoader = loadDefinitionLoaderByFilename(headType, predefined[0], series);
+        const defaultDefinitionLoader = loadDefinitionLoaderByFilename(headType, predefined, configPath);
         for (const filename of defaultFilenames) {
             if (ConfigV1Regex.test(filename)) {
                 try {
-                    const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, series, isDefault);
-                    if (defaultDefinitionLoader) {
+                    const definitionLoader = loadDefinitionLoaderByFilename(headType, filename, configPath, isDefault);
+                    if (!definitionLoader.isRecommended && defaultDefinitionLoader) {
                         const ownKeys = Array.from(defaultDefinitionLoader.ownKeys).filter(e => !definitionLoader.ownKeys.has(e));
                         if (ownKeys && ownKeys.length > 0) {
                             for (const ownKey of ownKeys) {
                                 definitionLoader.ownKeys.add(ownKey);
                             }
-                            writeDefinition(headType, filename, series, definitionLoader);
+                            writeDefinition(filename, configPath, definitionLoader);
                         }
                     }
                     definitions.push(definitionLoader.toObject());
@@ -481,6 +522,15 @@ export function loadAllSeriesDefinitions(isDefault = false, headType, series = '
         }
     }
 
-
     return definitions;
+}
+
+export function getParameterKeys() {
+    return {
+        qualityProfileArr: Array.from(qualityProfileArr),
+        materialProfileArr: Array.from(materialProfileArr),
+        extruderProfileArr: Array.from(extruderProfileArr),
+        printingProfileLevel: printingProfileLevel,
+        materialProfileLevel: materialProfileLevel,
+    };
 }

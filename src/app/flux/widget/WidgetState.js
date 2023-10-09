@@ -1,10 +1,11 @@
 import _ from 'lodash';
 
-import { PROTOCOL_TEXT, PROTOCOL_SCREEN, MACHINE_SERIES } from '../../constants';
+import { PROTOCOL_TEXT } from '../../constants';
+import { MACHINE_SERIES } from '../../constants/machines';
 
 const DEFAULT_STATE = {
     machine: {
-        series: MACHINE_SERIES.ORIGINAL.value
+        series: MACHINE_SERIES.ORIGINAL.identifier
     },
     workspace: {
         default: {
@@ -19,13 +20,13 @@ const DEFAULT_STATE = {
         right: {
             show: true,
             widgets: [
-                'working-progress', 'wifi-transport', 'enclosure', 'purifier', 'control', 'macro'
+                'job-status', 'wifi-transport', 'enclosure', 'purifier', 'control', 'macro',
             ]
         }
     },
     printing: {
         default: {
-            widgets: ['3dp-material', '3dp-configurations']
+            widgets: [],
         }
     },
     laser: {
@@ -36,16 +37,6 @@ const DEFAULT_STATE = {
     cnc: {
         default: {
             widgets: ['toolpath-list', 'cnc-path']
-        }
-    },
-    developerPanel: {
-        primary: {
-            widgets: [
-                'axesPanel', 'macroPanel'
-            ]
-        },
-        default: {
-            widgets: []
         }
     },
     widgets: {
@@ -69,22 +60,6 @@ const DEFAULT_STATE = {
             },
             dataSource: PROTOCOL_TEXT
         },
-        axesPanel: {
-            minimized: false,
-            axes: ['x', 'y', 'z'],
-            jog: {
-                keypad: false,
-                selectedDistance: '1',
-                customDistance: 10
-            },
-            shuttle: {
-                feedrateMin: 500,
-                feedrateMax: 2000,
-                hertz: 10,
-                overshoot: 1
-            },
-            dataSource: PROTOCOL_SCREEN
-        },
         connection: {
             minimized: false,
             controller: {
@@ -101,10 +76,6 @@ const DEFAULT_STATE = {
         macro: {
             minimized: false,
             dataSource: PROTOCOL_TEXT
-        },
-        macroPanel: {
-            minimized: false,
-            dataSource: PROTOCOL_SCREEN
         },
         marlin: {
             minimized: false,
@@ -199,6 +170,13 @@ const SERIES_STATES = {
         }
     },
     A350: {
+        laser: {
+            default: {
+                widgets: ['toolpath-list', 'laser-params']
+            }
+        }
+    },
+    A400: {
         laser: {
             default: {
                 widgets: ['toolpath-list', 'laser-params']
@@ -309,6 +287,9 @@ class WidgetState {
         }
         if (!arrayEqual(widgetState.seriesStates.A350.laser.default.widgets, SERIES_STATES.A350.laser.default.widgets)) {
             widgetState.seriesStates.A350.laser.default.widgets = SERIES_STATES.A350.laser.default.widgets;
+        }
+        if (!arrayEqual(widgetState.seriesStates.A400.laser.default.widgets, SERIES_STATES.A400.laser.default.widgets)) {
+            widgetState.seriesStates.A400.laser.default.widgets = SERIES_STATES.A400.laser.default.widgets;
         }
     }
 

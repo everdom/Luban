@@ -1,7 +1,5 @@
-/* eslint react/no-set-state: 0 */
-import pick from 'lodash/pick';
-import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
+import React, { PureComponent } from 'react';
 import ReactDOM from 'react-dom';
 import i18n from '../../../lib/i18n';
 import { Button } from '../Buttons';
@@ -9,7 +7,7 @@ import SvgIcon from '../SvgIcon';
 import Modal from './index';
 import styles from './styles.styl';
 
-class ModalSmallHOC extends PureComponent {
+export class ModalSmallHOC extends PureComponent {
     static propTypes = {
         ...Modal.propTypes,
         container: PropTypes.object,
@@ -55,7 +53,7 @@ class ModalSmallHOC extends PureComponent {
     }
 
     render() {
-        const { onCancel, onConfirm, showCloseButton = true } = this.props;
+        const { onCancel, onConfirm, showCloseButton = true, ...rest } = this.props;
         const { show } = this.state;
         const img = this.props.img || '';
         const iconColor = this.props.iconColor;
@@ -63,11 +61,10 @@ class ModalSmallHOC extends PureComponent {
         const text = this.props.text;
         const subtext = this.props.subtext;
         const title = this.props.title;
-        const props = pick(this.props, Object.keys(Modal.propTypes));
 
         return (
             <Modal
-                {...props}
+                {...rest}
                 showCloseButton={showCloseButton}
                 onClose={this.handleClose}
                 show={show}
@@ -80,9 +77,9 @@ class ModalSmallHOC extends PureComponent {
                         {!isImage && (
                             <SvgIcon
                                 name={img}
-                                size="72"
+                                size={72}
                                 color={iconColor}
-                                type="static"
+                                type={['static']}
                             />
                         )}
                         {isImage && (<img src={img} alt="......" />)}

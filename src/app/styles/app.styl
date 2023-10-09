@@ -9,15 +9,7 @@
 
 // Style Portal
 @import "scaffolding";
-@import "scaffolding-bootstrap";
 @import "typography";
-
-// Bootstrap Helper
-@import "bootstrap-col-height";
-@import "bootstrap-no-gutters";
-@import "bootstrap-btn-select";
-@import "bootstrap-vertical-spacing";
-@import "bootstrap-override";
 
 // Helper classes
 @import "helper";
@@ -30,9 +22,24 @@
 
 @import "sm-buttons"
 @import "sm-flex"
+@import "sm-grid";
 @import "sm-tabs"
 @import "sm-icon"
 @import "sm-parameter"
 
 /* global style */
 @import "global";
+
+[class~='appbar'] {
+    .app-content {
+        margin-top: 24px;
+    }
+}
+.app-content {
+    margin-top: 0;
+}
+
+.ant-message-custom-content {
+    display: flex;
+    align-items: center;
+}

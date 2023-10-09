@@ -1,67 +1,69 @@
-import React, { PureComponent } from 'react';
-import { Group } from 'three';
-import { withRouter } from 'react-router-dom';
-import PropTypes from 'prop-types';
-import { connect } from 'react-redux';
-import isElectron from 'is-electron';
-import Mousetrap from 'mousetrap';
-import i18next from 'i18next';
 import classNames from 'classnames';
-import { cloneDeep } from 'lodash';
-import Checkbox from '../components/Checkbox';
-import { Button } from '../components/Buttons';
-import { renderModal } from '../utils';
-import AppBar from '../views/AppBar';
-import i18n from '../../lib/i18n';
-import UniApi from '../../lib/uni-api';
-import { checkIsSnapmakerProjectFile, checkIsGCodeFile } from '../../lib/check-name';
-import Settings from '../pages/Settings/Settings';
-import FirmwareTool from '../pages/Settings/FirmwareTool';
-import SoftwareUpdate from '../pages/Settings/SoftwareUpdate';
-import DownloadUpdate from '../pages/Settings/SoftwareUpdate/DownloadUpdate';
+import i18next from 'i18next';
+import isElectron from 'is-electron';
+import { cloneDeep, includes, throttle } from 'lodash';
+import Mousetrap from 'mousetrap';
+import PropTypes from 'prop-types';
+import React from 'react';
+import { connect } from 'react-redux';
+import { withRouter } from 'react-router-dom';
+import { Group } from 'three';
 
 import {
-    // HEAD_PRINTING,
-    HEAD_LASER,
-    HEAD_CNC,
-    COORDINATE_MODE_CENTER,
-    COORDINATE_MODE_BOTTOM_CENTER,
-    getCurrentHeadType,
-    HEAD_TYPE_ENV_NAME,
-    SOFTWARE_MANUAL,
     FORUM_URL,
-    SUPPORT_ZH_URL,
-    SUPPORT_EN_URL,
-    TUTORIAL_VIDEO_URL,
-    OFFICIAL_SITE_ZH_URL,
-    OFFICIAL_SITE_EN_URL,
-    MARKET_ZH_URL,
+    HEAD_CNC,
+    HEAD_LASER,
+    HEAD_TYPE_ENV_NAME,
     MARKET_EN_URL,
-    MYMINIFACTORY_URL
+    MARKET_ZH_URL,
+    OFFICIAL_SITE_EN_URL,
+    OFFICIAL_SITE_ZH_URL,
+    SOFTWARE_MANUAL,
+    SUPPORT_EN_URL,
+    SUPPORT_ZH_URL,
+    TUTORIAL_VIDEO_URL
 } from '../../constants';
-import { actions as menuActions } from '../../flux/appbar-menu';
-import { actions as machineActions } from '../../flux/machine';
-import { actions as editorActions } from '../../flux/editor';
-import { actions as projectActions } from '../../flux/project';
-import { actions as operationHistoryActions } from '../../flux/operation-history';
-import { actions as settingsActions } from '../../flux/setting';
-import { actions as appGlobalActions } from '../../flux/app-global';
-import styles from './styles/appbar.styl';
-// import HomePage from '../pages/HomePage';
-// import Workspace from '../pages/Workspace';
-import ModelExporter from '../widgets/PrintingVisualizer/ModelExporter';
-import Anchor from '../components/Anchor';
-import SvgIcon from '../components/SvgIcon';
 
-class AppLayout extends PureComponent {
+import { actions as appGlobalActions } from '../../flux/app-global';
+import { actions as menuActions } from '../../flux/appbar-menu';
+import { actions as editorActions } from '../../flux/editor';
+import { actions as machineActions } from '../../flux/machine';
+import { actions as operationHistoryActions } from '../../flux/operation-history';
+import { actions as projectActions } from '../../flux/project';
+import { actions as settingsActions } from '../../flux/setting';
+
+import { checkIsGCodeFile, checkIsSnapmakerProjectFile } from '../../lib/check-name';
+import { logLubanQuit } from '../../lib/gaEvent';
+import i18n from '../../lib/i18n';
+import UniApi from '../../lib/uni-api';
+import { getCurrentHeadType } from '../../lib/url-utils';
+import Anchor from '../components/Anchor';
+import { Button } from '../components/Buttons';
+import Checkbox from '../components/Checkbox';
+import Modal from '../components/Modal/tileModal';
+import Space from '../components/Space';
+import SvgIcon from '../components/SvgIcon';
+import CaseResource from '../pages/CaseResource/index';
+import FirmwareTool from '../pages/global-modals/FirmwareTool';
+import Settings from '../pages/global-modals/settings-modal';
+import SoftwareUpdate from '../pages/global-modals/SoftwareUpdate';
+import DownloadUpdate from '../pages/global-modals/SoftwareUpdate/DownloadUpdate';
+import { renderModal } from '../utils';
+import { AppBar } from '../views/AppBar';
+import ModelExporter from '../widgets/PrintingVisualizer/ModelExporter';
+import styles from './styles/appbar.styl';
+
+
+class AppLayout extends React.PureComponent {
     static propTypes = {
         modelGroup: PropTypes.object.isRequired,
         store: PropTypes.object.isRequired,
         currentModalPath: PropTypes.string,
         updateCurrentModalPath: PropTypes.func.isRequired,
         startProject: PropTypes.func.isRequired,
-        changeCoordinateMode: PropTypes.func.isRequired,
-        updateMaterials: PropTypes.func.isRequired,
+        initializeWorkpiece: PropTypes.func.isRequired,
+        initializeOrigin: PropTypes.func.isRequired,
+        scaleCanvasToFit: PropTypes.func.isRequired,
         initRecoverService: PropTypes.func.isRequired,
         save: PropTypes.func.isRequired,
         saveAndClose: PropTypes.func.isRequired,
@@ -84,13 +86,21 @@ class AppLayout extends PureComponent {
         updateMachineToolHead: PropTypes.func.isRequired,
         longTermBackupConfig: PropTypes.func.isRequired,
         showSavedModal: PropTypes.bool.isRequired,
-        savedModalType: PropTypes.string.isRequired,
+        savedModalType: PropTypes.string,
         savedModalFilePath: PropTypes.string.isRequired,
         savedModalZIndex: PropTypes.number.isRequired,
         updateSavedModal: PropTypes.func.isRequired,
         showArrangeModelsError: PropTypes.bool.isRequired,
         arrangeModelZIndex: PropTypes.number.isRequired,
-        updateShowArrangeModelsError: PropTypes.func.isRequired
+        updateShowArrangeModelsError: PropTypes.func.isRequired,
+        wifiStatusTest: PropTypes.func.isRequired,
+
+        // dev tools
+        resetUserConfig: PropTypes.func.isRequired,
+
+        // Case Resource
+        showCaseResource: PropTypes.bool.isRequired,
+        updateShowCaseReource: PropTypes.func.isRequired,
     };
 
     state = {
@@ -101,9 +111,12 @@ class AppLayout extends PureComponent {
         releaseNotes: '',
         prevVersion: '',
         version: ''
-    }
+    };
 
-    activeTab = ''
+    activeTab = '';
+
+    downloadingRef = React.createRef(false);
+    caseResourceModalRef = React.createRef(null);
 
     actions = {
         renderSettingModal: () => {
@@ -187,6 +200,15 @@ class AppLayout extends PureComponent {
                 showDevelopToolsModal: true
             });
         },
+        startingDownloadUpdate: throttle(() => {
+            if (this.downloadingRef.current) {
+                UniApi.Update.downloadHasStarted();
+            } else {
+                this.downloadingRef.current = true;
+                const { ipcRenderer } = window.require('electron');
+                ipcRenderer.send('startingDownloadUpdate');
+            }
+        }, 300),
         renderCheckForUpdatesModal: () => {
             const onClose = () => {
                 this.setState({
@@ -199,15 +221,16 @@ class AppLayout extends PureComponent {
                     return (<SoftwareUpdate />);
                 },
                 shouldRenderFooter: false,
-                renderFooter() { return null; },
+                renderFooter() {
+                    return null;
+                },
                 onClose,
                 actions: []
             });
         },
         renderDownloadUpdateModal: () => {
-            const { releaseNotes, prevVersion, version } = this.state;
+            const { releaseNotes, releaseChangeLog, prevVersion, version } = this.state;
             const { shouldCheckForUpdate } = this.props;
-            const { ipcRenderer } = window.require('electron');
             const onClose = () => {
                 this.setState({
                     showDownloadUpdateModal: false
@@ -219,6 +242,7 @@ class AppLayout extends PureComponent {
                     return (
                         <DownloadUpdate
                             releaseNotes={releaseNotes}
+                            releaseChangeLog={releaseChangeLog}
                             prevVersion={prevVersion}
                             version={version}
                         />
@@ -230,7 +254,9 @@ class AppLayout extends PureComponent {
                             <div className="display-inline height-32">
                                 <Checkbox
                                     checked={shouldCheckForUpdate}
-                                    onChange={(event) => { this.props.updateShouldCheckForUpdate(event.target.checked); }}
+                                    onChange={(event) => {
+                                        this.props.updateShouldCheckForUpdate(event.target.checked);
+                                    }}
 
                                 />
                                 <span className="margin-left-4">
@@ -252,7 +278,7 @@ class AppLayout extends PureComponent {
                                     className="margin-left-8"
                                     width="auto"
                                     type="primary"
-                                    onClick={() => ipcRenderer.send('startingDownloadUpdate')}
+                                    onClick={() => this.actions.startingDownloadUpdate()}
                                 >
                                     {i18n._('key-App/Update-Update Now')}
                                 </Button>
@@ -264,6 +290,21 @@ class AppLayout extends PureComponent {
                 actions: []
             });
         },
+        renderCaseResource: () => {
+            const onClose = () => { this.props.updateShowCaseReource(false); };
+            const onCallBack = () => { };
+            return (
+                <Modal
+                    wrapClassName={this.props.showCaseResource ? 'display-block' : 'display-none'}
+                    closable={false}
+                    disableOverlay
+                    tile
+                    onClose={onClose}
+                >
+                    <CaseResource isPopup onClose={onClose} key="case-resource-popup" onCallBack={onCallBack} />
+                </Modal>
+            );
+        },
         showCheckForUpdates: () => {
             this.setState({
                 showCheckForUpdatesModal: true
@@ -273,6 +314,7 @@ class AppLayout extends PureComponent {
             if (downloadInfo) {
                 this.setState({
                     releaseNotes: downloadInfo.releaseNotes,
+                    releaseChangeLog: downloadInfo.releaseChangeLog,
                     prevVersion: downloadInfo.prevVersion,
                     version: downloadInfo.version,
                     showDownloadUpdateModal: true
@@ -287,8 +329,8 @@ class AppLayout extends PureComponent {
             if (this.props.savedModalType === 'web') {
                 return (
                     <div
-                        className={classNames('border-default-black-5', 'border-radius-4', 'box-shadow-module', 'position-ab',
-                            'background-color-white', 'padding-horizontal-10', 'padding-vertical-10', 'bottom-0', 'margin-bottom-16')}
+                        className={classNames('border-default-black-5', 'border-radius-4', 'box-shadow-module', 'position-absolute',
+                            'background-color-white', 'padding-horizontal-10', 'padding-vertical-8', 'bottom-0', 'margin-bottom-16')}
                         style={{
                             zIndex: this.props.savedModalZIndex,
                             left: '50%',
@@ -300,7 +342,7 @@ class AppLayout extends PureComponent {
                             <div className="sm-flex-auto font-roboto font-weight-normal font-size-middle">
                                 <SvgIcon
                                     name="WarningTipsSuccess"
-                                    size="24"
+                                    size={24}
                                     type={['static']}
                                     color="#4cb518"
                                 />
@@ -312,7 +354,7 @@ class AppLayout extends PureComponent {
                                 <SvgIcon
                                     name="Cancel"
                                     type={['static']}
-                                    size="24"
+                                    size={24}
                                     onClick={onClose}
                                 />
                             </div>
@@ -328,7 +370,7 @@ class AppLayout extends PureComponent {
                 };
                 return (
                     <div
-                        className={classNames('border-default-black-5', 'border-radius-4', 'box-shadow-module', 'position-ab',
+                        className={classNames('border-default-black-5', 'border-radius-4', 'box-shadow-module', 'position-absolute',
                             'background-color-white', 'padding-horizontal-16', 'padding-vertical-16', 'bottom-0', 'margin-bottom-16',
                             'left-50-percent', 'max-width-360')}
                         style={{
@@ -343,9 +385,8 @@ class AppLayout extends PureComponent {
                                     type={['static']}
                                     color="#4cb518"
                                 />
-                                <span>
-                                    {i18n._('key-app_layout-File Saved')}
-                                </span>
+                                <span>{i18n._('key-app_layout-File Saved')}</span>
+                                <Space width={4} />
                                 <Anchor
                                     onClick={openFolder}
                                 >
@@ -388,7 +429,7 @@ class AppLayout extends PureComponent {
             };
             return (
                 <div
-                    className={classNames('border-default-black-5', 'border-radius-4', 'box-shadow-module', 'position-ab',
+                    className={classNames('border-default-black-5', 'border-radius-4', 'box-shadow-module', 'position-absolute',
                         'background-color-white', 'padding-horizontal-16', 'padding-vertical-16', 'bottom-0', 'margin-bottom-16',
                         'left-50-percent', 'max-width-360')}
                     style={{
@@ -471,14 +512,16 @@ class AppLayout extends PureComponent {
             await this.props.save(headType);
         },
         saveAll: async () => {
-            await this.actions.closeFile();
+            return this.actions.closeFile();
         },
         closeFile: async () => {
             const currentHeadType = getCurrentHeadType(this.props.history.location.pathname);
             const message = i18n._('key-Project/Save-Save the changes you made in the {{headType}} G-code Generator? Your changes will be lost if you don’t save them.', { headType: i18n._(HEAD_TYPE_ENV_NAME[currentHeadType]) });
             if (currentHeadType) {
-                await this.props.saveAndClose(currentHeadType, { message });
+                return this.props.saveAndClose(currentHeadType, { message });
             }
+
+            return true;
         },
         initFileOpen: async () => {
             const file = await UniApi.File.popFile();
@@ -507,12 +550,17 @@ class AppLayout extends PureComponent {
                 format = filePath.split('.').pop();
             }
             const outputObject = new Group();
-            this.props.modelGroup.models.forEach(item => {
+
+            // Add all visible objects
+            const modelGroup = this.props.modelGroup;
+            modelGroup.models.forEach(item => {
                 if (item.visible) {
                     const tempMeshObject = cloneDeep(item.meshObject);
                     outputObject.add(tempMeshObject);
                 }
             });
+            // outputObject.add(cloneDeep(modelGroup.selectedGroup));
+
             const output = new ModelExporter().parse(outputObject, format, isBinary);
             if (!output) {
                 // export error
@@ -542,6 +590,7 @@ class AppLayout extends PureComponent {
             });
             UniApi.Event.on('is-replacing-app-now', (event, downloadInfo) => {
                 UniApi.Update.isReplacingAppNow(downloadInfo);
+                this.downloadingRef.current = false;
                 this.props.updateIsDownloading(false);
             });
             UniApi.Event.on('open-file', (event, file, arr) => {
@@ -555,8 +604,11 @@ class AppLayout extends PureComponent {
                 switch (pathname) {
                     case '/printing':
                     case '/laser':
-                    case '/cnc': this.actions.saveAsFile(file); break;
-                    default: break;
+                    case '/cnc':
+                        this.actions.saveAsFile(file);
+                        break;
+                    default:
+                        break;
                 }
             });
             UniApi.Event.on('appbar-menu:save', () => {
@@ -564,13 +616,20 @@ class AppLayout extends PureComponent {
                 switch (pathname) {
                     case '/printing':
                     case '/laser':
-                    case '/cnc': this.actions.save(); break;
-                    default: break;
+                    case '/cnc':
+                        this.actions.save();
+                        break;
+                    default:
+                        break;
                 }
             });
             UniApi.Event.on('save-and-close', async () => {
-                await this.actions.saveAll();
-                UniApi.Window.call('destroy');
+                logLubanQuit();
+
+                const done = await this.actions.saveAll();
+                if (done) {
+                    UniApi.Window.call('destroy');
+                }
             });
             UniApi.Event.on('close-file', async () => {
                 await this.actions.closeFile();
@@ -582,8 +641,10 @@ class AppLayout extends PureComponent {
                 UniApi.Connection.navigateToWorkspace();
             });
             UniApi.Event.on('app-quit', async () => {
-                await this.actions.closeFile();
-                UniApi.APP.quit();
+                const done = await this.actions.closeFile();
+                if (done) {
+                    UniApi.APP.quit();
+                }
             });
             UniApi.Event.on('open-file-in-app', async () => {
                 // const pathname = this.props.currentModalPath || this.props.history?.location?.pathname;
@@ -624,9 +685,6 @@ class AppLayout extends PureComponent {
             UniApi.Event.on('developer-tools.show', (event, ...args) => {
                 UniApi.Event.emit('appbar-menu:developer-tools.show', ...args);
             });
-            UniApi.Event.on('check-for-updates.show', (event, ...args) => {
-                UniApi.Event.emit('appbar-menu:check-for-updates.show', ...args);
-            });
             UniApi.Event.on('help.link', (event, ...args) => {
                 UniApi.Event.emit('appbar-menu:help.link', ...args);
             });
@@ -642,20 +700,52 @@ class AppLayout extends PureComponent {
             UniApi.Event.on('longterm-backup-config', (event, ...args) => {
                 UniApi.Event.emit('appbar-menu:longterm-backup-config', ...args);
             });
+            UniApi.Event.on('open-config-folder', (event, ...args) => {
+                UniApi.Event.emit('appbar-menu:open-config-folder', ...args);
+            });
 
+            // help
+            UniApi.Event.on('check-for-updates.show', (event, ...args) => {
+                UniApi.Event.emit('appbar-menu:check-for-updates.show', ...args);
+            });
+            UniApi.Event.on('dev-tool.reset-configurations', (event, ...args) => {
+                UniApi.Event.emit('appbar-menu:dev-tool.reset-configurations', ...args);
+            });
+            UniApi.Event.on('download-log', (event, ...args) => {
+                UniApi.Event.emit('appbar-menu:download-log', ...args);
+            });
+            UniApi.Event.on('open-engine-test', (event, ...args) => {
+                UniApi.Event.emit('appbar-menu:open-engine-test', ...args);
+            });
+            UniApi.Event.on('wifi-status-test', (event, ...args) => {
+                UniApi.Event.emit('appbar-menu:wifi-status-test', ...args);
+            });
+
+            // Appbar
             UniApi.Event.on('appbar-menu:open-file', (file, arr) => {
                 this.actions.openProject(file);
                 if (arr && arr.length) {
                     this.actions.updateRecentFile(arr, 'update');
                 }
             });
+
+            // app menu
             UniApi.Event.on('appbar-menu:window', (type) => {
                 switch (type) {
-                    case 'reload': UniApi.Window.reload(); break;
-                    case 'forceReload': UniApi.Window.forceReload(); break;
-                    case 'viewInBrowser': UniApi.Window.viewInBrowser(); break;
-                    case 'toggleFullscreen': UniApi.Window.toggleFullscreen(); break;
-                    default: break;
+                    case 'reload':
+                        UniApi.Window.reload();
+                        break;
+                    case 'forceReload':
+                        UniApi.Window.forceReload();
+                        break;
+                    case 'viewInBrowser':
+                        UniApi.Window.viewInBrowser();
+                        break;
+                    case 'toggleFullscreen':
+                        UniApi.Window.toggleFullscreen();
+                        break;
+                    default:
+                        break;
                 }
             });
             UniApi.Event.on('appbar-menu:help.link', (type) => {
@@ -667,7 +757,7 @@ class AppLayout extends PureComponent {
                         UniApi.Window.openLink(FORUM_URL);
                         break;
                     case 'supports':
-                        if (i18next.language === 'zh-cn') {
+                        if (i18next.language === 'zh-CN') {
                             UniApi.Window.openLink(SUPPORT_ZH_URL);
                         } else {
                             UniApi.Window.openLink(SUPPORT_EN_URL);
@@ -677,23 +767,21 @@ class AppLayout extends PureComponent {
                         UniApi.Window.openLink(TUTORIAL_VIDEO_URL);
                         break;
                     case 'officialSite':
-                        if (i18next.language === 'zh-cn') {
+                        if (i18next.language === 'zh-CN') {
                             UniApi.Window.openLink(OFFICIAL_SITE_ZH_URL);
                         } else {
                             UniApi.Window.openLink(OFFICIAL_SITE_EN_URL);
                         }
                         break;
                     case 'market':
-                        if (i18next.language === 'zh-cn') {
+                        if (i18next.language === 'zh-CN') {
                             UniApi.Window.openLink(MARKET_ZH_URL);
                         } else {
                             UniApi.Window.openLink(MARKET_EN_URL);
                         }
                         break;
-                    case 'myminifactory':
-                        UniApi.Window.openLink(MYMINIFACTORY_URL);
+                    default:
                         break;
-                    default: break;
                 }
             });
             UniApi.Event.on('appbar-menu:shortcut', (...commands) => {
@@ -707,27 +795,16 @@ class AppLayout extends PureComponent {
                 const { toolHead, series } = this.props.machineInfo;
                 await this.props.startProject(oldPathname, `/${headType}`, history, isRotate);
                 await this.props.updateMachineToolHead(toolHead, series, headType);
-                if (headType === HEAD_CNC || headType === HEAD_LASER) {
-                    if (!isRotate) {
-                        const { materials } = this.props.store?.[headType];
-                        await this.props.changeCoordinateMode(headType, COORDINATE_MODE_CENTER);
-                        if (materials.isRotate !== isRotate) {
-                            await this.props.updateMaterials(headType, { isRotate });
-                        }
-                    } else {
-                        const { SVGActions, materials } = this.props.store?.[headType];
-                        if (materials.isRotate !== isRotate) {
-                            await this.props.changeCoordinateMode(
-                                headType,
-                                COORDINATE_MODE_BOTTOM_CENTER, {
-                                    x: materials.diameter * Math.PI,
-                                    y: materials.length
-                                },
-                                !SVGActions.svgContentGroup
-                            );
-                            await this.props.updateMaterials(headType, { isRotate });
-                        }
-                    }
+
+                // initialize workpiece now
+                if (includes([HEAD_LASER, HEAD_CNC], headType)) {
+                    await this.props.initializeWorkpiece(headType, {
+                        isRotate: isRotate,
+                    });
+
+                    await this.props.initializeOrigin(headType);
+
+                    await this.props.scaleCanvasToFit(headType);
                 }
             });
             UniApi.Event.on('appbar-menu:clear-recent-files', () => {
@@ -745,18 +822,32 @@ class AppLayout extends PureComponent {
                     if (this.props.store?.[pathname.slice(1)]?.materials?.isRotate && pathname === '/laser') {
                         type = '/laser-rotate';
                     }
-                    const file = await UniApi.Dialog.showOpenFileDialog(type);
-                    if (!file) {
+                    const isMultiSelect = pathname === '/printing';
+                    const files = await UniApi.Dialog.showOpenFileDialog(type, isMultiSelect);
+                    if (!files) {
                         return;
                     }
-                    fileObj = UniApi.File.constructFileObj(file.path, file.name.split('\\').pop());
+                    if (isMultiSelect) {
+                        fileObj = files.map(file => UniApi.File.constructFileObj(file.path, file.name.split('\\').pop()));
+                    } else {
+                        fileObj = UniApi.File.constructFileObj(files.path, files.name.split('\\').pop());
+                    }
                 }
                 switch (pathname) {
-                    case '/printing': UniApi.Event.emit('appbar-menu:printing.import', fileObj); break;
-                    case '/laser': UniApi.Event.emit('appbar-menu:laser.import', fileObj); break;
-                    case '/cnc': UniApi.Event.emit('appbar-menu:cnc.import', fileObj); break;
-                    case '/workspace': UniApi.Event.emit('appbar-menu:workspace.import', fileObj); break;
-                    default: break;
+                    case '/printing':
+                        UniApi.Event.emit('appbar-menu:printing.import', fileObj);
+                        break;
+                    case '/laser':
+                        UniApi.Event.emit('appbar-menu:laser.import', fileObj);
+                        break;
+                    case '/cnc':
+                        UniApi.Event.emit('appbar-menu:cnc.import', fileObj);
+                        break;
+                    case '/workspace':
+                        UniApi.Event.emit('appbar-menu:workspace.import', fileObj);
+                        break;
+                    default:
+                        break;
                 }
             });
             UniApi.Event.on('appbar-menu:export-model', () => {
@@ -788,11 +879,20 @@ class AppLayout extends PureComponent {
             UniApi.Event.on('appbar-menu:export-gcode', () => {
                 const pathname = this.props.currentModalPath || this.props.history.location.pathname;
                 switch (pathname) {
-                    case '/printing': UniApi.Event.emit('appbar-menu:printing.export-gcode'); break;
-                    case '/laser': UniApi.Event.emit('appbar-menu:cnc-laser.export-gcode'); break;
-                    case '/cnc': UniApi.Event.emit('appbar-menu:cnc-laser.export-gcode'); break;
-                    case '/workspace': UniApi.Event.emit('appbar-menu:workspace.export-gcode'); break;
-                    default: break;
+                    case '/printing':
+                        UniApi.Event.emit('appbar-menu:printing.export-gcode');
+                        break;
+                    case '/laser':
+                        UniApi.Event.emit('appbar-menu:cnc-laser.export-gcode');
+                        break;
+                    case '/cnc':
+                        UniApi.Event.emit('appbar-menu:cnc-laser.export-gcode');
+                        break;
+                    case '/workspace':
+                        UniApi.Event.emit('appbar-menu:workspace.export-gcode');
+                        break;
+                    default:
+                        break;
                 }
             });
 
@@ -829,8 +929,39 @@ class AppLayout extends PureComponent {
                     this.props.restartGuideTours(pathname, this.props.history);
                 }
             });
+
+            // settings
+            UniApi.Event.on('appbar-menu:open-config-folder', () => {
+                const path = window.require('path');
+                const ipc = window.require('electron').ipcRenderer;
+
+                const { app } = window.require('@electron/remote');
+                const configDir = path.join(app.getPath('userData'), 'Config');
+
+                ipc.send('open-saved-path', configDir);
+            });
+
+            // help
+            UniApi.Event.on('appbar-menu:dev-tool.reset-configurations', () => {
+                this.props.resetUserConfig();
+            });
+            UniApi.Event.on('appbar-menu:download-log', () => {
+                UniApi.File.exportAs('/Logs/server.log', '/Logs/server.log', 'server.log');
+            });
+            UniApi.Event.on('appbar-menu:open-engine-test', () => {
+                const path = window.require('path');
+                const ipc = window.require('electron').ipcRenderer;
+
+                const { app } = window.require('@electron/remote');
+                const p = path.join(app.getAppPath(), './resources/engine-test');
+
+                ipc.send('open-engine-test-path', p);
+            });
+            UniApi.Event.on('appbar-menu:wifi-status-test', () => {
+                this.props.wifiStatusTest();
+            });
         }
-    }
+    };
 
     // componentWillMount() {
     // }
@@ -860,13 +991,14 @@ class AppLayout extends PureComponent {
         return (
             <div className={isElectron() ? null : 'appbar'}>
                 <AppBar />
-                { showSettingsModal ? this.actions.renderSettingModal() : null }
-                { showDevelopToolsModal ? this.actions.renderDevelopToolsModal() : null }
-                { showCheckForUpdatesModal ? this.actions.renderCheckForUpdatesModal() : null }
-                { showDownloadUpdateModal ? this.actions.renderDownloadUpdateModal() : null }
-                { showSavedModal ? this.actions.renderSavedModal() : null }
-                { showArrangeModelsError ? this.actions.renderArrangeModelsError() : null }
-                <div className={isElectron() ? null : classNames(styles['app-content'])}>
+                {showSettingsModal ? this.actions.renderSettingModal() : null}
+                {showDevelopToolsModal ? this.actions.renderDevelopToolsModal() : null}
+                {showCheckForUpdatesModal ? this.actions.renderCheckForUpdatesModal() : null}
+                {showDownloadUpdateModal ? this.actions.renderDownloadUpdateModal() : null}
+                {showSavedModal ? this.actions.renderSavedModal() : null}
+                {showArrangeModelsError ? this.actions.renderArrangeModelsError() : null}
+                {this.actions.renderCaseResource()}
+                <div className={isElectron() ? null : classNames(styles['app-content'])} style={{ border: 'solid 1px transparent' }}>
                     {this.props.children}
                 </div>
             </div>
@@ -879,8 +1011,14 @@ const mapStateToProps = (state) => {
     const { currentModalPath } = state.appbarMenu;
     const { shouldCheckForUpdate } = machineInfo;
     const { modelGroup } = state.printing;
-    const { showSavedModal, savedModalType, savedModalFilePath, savedModalZIndex,
-        showArrangeModelsError, arrangeModelZIndex
+    const {
+        showSavedModal,
+        savedModalType,
+        savedModalFilePath = '',
+        savedModalZIndex,
+        showArrangeModelsError,
+        arrangeModelZIndex,
+        showCaseResource
     } = state.appGlobal;
     // const projectState = state.project;
     return {
@@ -894,7 +1032,8 @@ const mapStateToProps = (state) => {
         savedModalFilePath,
         savedModalZIndex,
         showArrangeModelsError,
-        arrangeModelZIndex
+        arrangeModelZIndex,
+        showCaseResource
     };
 };
 
@@ -908,8 +1047,9 @@ const mapDispatchToProps = (dispatch) => {
         openProject: (file, history) => dispatch(projectActions.openProject(file, history)),
         startProject: (from, to, history, isRotate) => dispatch(projectActions.startProject(from, to, history, false, isRotate)),
         updateRecentProject: (arr, type) => dispatch(projectActions.updateRecentFile(arr, type)),
-        changeCoordinateMode: (headType, coordinateMode, coordinateSize) => dispatch(editorActions.changeCoordinateMode(headType, coordinateMode, coordinateSize)),
-        updateMaterials: (headType, newMaterials) => dispatch(editorActions.updateMaterials(headType, newMaterials)),
+        initializeWorkpiece: (headType, options) => dispatch(editorActions.initializeWorkpiece(headType, options)),
+        initializeOrigin: (headType) => dispatch(editorActions.initializeOrigin(headType)),
+        scaleCanvasToFit: (headType) => dispatch(editorActions.scaleCanvasToFit(headType)),
         loadCase: (pathConfig, history) => dispatch(projectActions.openProject(pathConfig, history)),
         updateCurrentModalPath: (pathName) => dispatch(menuActions.updateCurrentModalPath(pathName)),
         updateMenu: () => dispatch(menuActions.updateMenu()),
@@ -923,7 +1063,13 @@ const mapDispatchToProps = (dispatch) => {
         updateMachineToolHead: (toolHead, series, headType) => dispatch(machineActions.updateMachineToolHead(toolHead, series, headType)),
         longTermBackupConfig: () => dispatch(settingsActions.longTermBackupConfig()),
         updateSavedModal: (options) => dispatch(appGlobalActions.updateSavedModal(options)),
-        updateShowArrangeModelsError: (options) => dispatch(appGlobalActions.updateShowArrangeModelsError(options))
+        updateShowArrangeModelsError: (options) => dispatch(appGlobalActions.updateShowArrangeModelsError(options)),
+        wifiStatusTest: () => dispatch(menuActions.wifiStatusTest()),
+
+        // reset configurations
+        resetUserConfig: () => dispatch(settingsActions.resetUserConfig()),
+
+        updateShowCaseReource: (showCaseResource) => dispatch(appGlobalActions.updateState({ showCaseResource }))
     };
 };
 

@@ -63,7 +63,6 @@ const ToolpathItem = ({
             <div
                 className={classNames(
                     styles['object-list-item'],
-                    'padding-horizontal-16',
                     'sm-flex',
                     'justify-space-between',
                     selectedToolPathIDArray.includes(toolPath.id) ? styles.selected : null
@@ -84,8 +83,12 @@ const ToolpathItem = ({
                 <Anchor
                     className={classNames(
                         'height-24',
+                        'width-254',
+                        'align-l',
                         'sm-flex',
-                        'sm-flex-width'
+                        'sm-flex-width',
+                        'margin-left-16',
+                        'margin-right-16',
                     )}
                     onDoubleClick={handleOnDoubleClick}
                     onClick={handleOnClick}
@@ -97,7 +100,7 @@ const ToolpathItem = ({
                         {suffixName}
                     </span>
                 </Anchor>
-                <div className={classNames('sm-flex', 'height-24')}>
+                <div className={classNames('sm-flex', 'height-24', 'margin-right-16')}>
                     <i
                         className={classNames(
                             // ...getIconStatus(toolPath.status)
@@ -245,7 +248,8 @@ const ToolPathListBox = (props) => {
                 <div
                     className={classNames(
                         'height-184',
-                        'align-c',
+                        'position-re',
+                        // // 'align-c',
                         'padding-vertical-4'
                     )}
                     tabIndex="-1"
@@ -257,11 +261,13 @@ const ToolPathListBox = (props) => {
                 >
                     {toolPaths.length === 0 && (
                         <div className={classNames(
-                            'font-roboto',
-                            'border-radius-8',
-                            'display-inline',
-                            'height-40',
+                            // 'font-roboto',
                             'padding-horizontal-16',
+                            'sm-flex',
+                            'position-absolute',
+                            'top-50-percent',
+                            'width-percent-100',
+                            'justify-center'
                         )}
                         >
                             <SvgIcon
@@ -269,7 +275,12 @@ const ToolPathListBox = (props) => {
                                 type={['static']}
                                 color="#1890ff"
                             />
-                            <span className={classNames('display-inline', 'height-40')}>{i18n._('key-CncLaser/ToolPathList/Button/-Select object to create toolpath')}</span>
+                            {/* <SvgIcon
+                                name="WarningTipsTips"
+                                type={['static']}
+                                color="#1890ff"
+                            /> */}
+                            <span className={classNames('display-inline')}>{i18n._('key-CncLaser/ToolPathList/Button/-Select object to create toolpath')}</span>
                         </div>
                     )}
 

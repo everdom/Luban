@@ -61,7 +61,7 @@ class PreviewTypeBox extends PureComponent {
         this.props.childrenObjects.forEach((child) => {
             child.onChangeValue(event);
         });
-    }
+    };
 
     render() {
         const { fatherContent, fatherColor, isDropdown, childrenObjects } = this.props;
@@ -70,7 +70,7 @@ class PreviewTypeBox extends PureComponent {
         return (
             <div>
                 <div
-                    className="sm-flex justify-space-between height-24 margin-vertical-8 padding-right-16"
+                    className="sm-flex justify-space-between height-24 margin-vertical-8 padding-right-16 align-center"
                 >
                     <div>
                         {isDropdown && (
@@ -93,7 +93,7 @@ class PreviewTypeBox extends PureComponent {
                                 onChangeFatherValue(event);
                             }}
                         />
-                        <span className="v-align-m margin-left-8">
+                        <span className="v-align-m margin-left-8 max-width-106 margin-right-4 text-overflow-ellipsis">
                             {fatherContent}
                         </span>
                     </div>
@@ -106,7 +106,7 @@ class PreviewTypeBox extends PureComponent {
                 {showDropdown && (childrenObjects.map((child) => {
                     const { value, onChangeValue, color, content } = child;
                     return (
-                        <div className="sm-flex justify-space-between height-24 margin-vertical-8 margin-left-32 padding-right-16">
+                        <div key={content} className="sm-flex justify-space-between height-24 margin-vertical-8 margin-left-32 padding-right-16">
                             <div>
                                 <Checkbox
                                     checked={value}

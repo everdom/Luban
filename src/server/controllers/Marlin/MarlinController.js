@@ -1,48 +1,53 @@
+import { EventEmitter } from 'events';
+import includes from 'lodash/includes';
 import isEmpty from 'lodash/isEmpty';
 import isEqual from 'lodash/isEqual';
-import includes from 'lodash/includes';
 import noop from 'lodash/noop';
 import semver from 'semver';
-import SerialConnection from '../../lib/SerialConnection';
-import interpret from '../../lib/interpret';
+
+import { DEFAULT_BAUDRATE } from '../../constants';
 import EventTrigger from '../../lib/EventTrigger';
 import Feeder from '../../lib/Feeder';
 import Sender, { SP_TYPE_SEND_RESPONSE } from '../../lib/Sender';
+import SerialConnection from '../../lib/SerialConnection';
 import Workflow, {
-    WORKFLOW_STATE_PAUSED,
-    WORKFLOW_STATE_RUNNING
+    WORKFLOW_STATUS_PAUSED,
+    WORKFLOW_STATUS_RUNNING
 } from '../../lib/Workflow';
-import { ensureRange } from '../../lib/numeric-utils';
 import ensureArray from '../../lib/ensure-array';
 import ensurePositiveNumber from '../../lib/ensure-positive-number';
 import evaluateExpression from '../../lib/evaluateExpression';
+import interpret from '../../lib/interpret';
 import logger from '../../lib/logger';
+import { ensureRange } from '../../lib/numeric-utils';
 import translateWithContext from '../../lib/translateWithContext';
 import monitor from '../../services/monitor';
 import taskRunner from '../../services/taskrunner';
 import store from '../../store';
-import Marlin from './Marlin';
 import {
+    HEAD_TYPE_3DP,
+    HEAD_TYPE_PRINTING,
     MARLIN,
-    QUERY_TYPE_POSITION,
+    QUERY_TYPE_EMERGEMCY_STOP,
+    QUERY_TYPE_ENCLOSURE,
     QUERY_TYPE_ORIGIN_OFFSET,
+    QUERY_TYPE_POSITION,
+    QUERY_TYPE_PURIFIER,
     QUERY_TYPE_TEMPERATURE,
     WRITE_SOURCE_CLIENT,
     WRITE_SOURCE_FEEDER,
-    WRITE_SOURCE_SENDER,
     WRITE_SOURCE_QUERY,
-    WRITE_SOURCE_UNKNOWN,
-    QUERY_TYPE_ENCLOSURE, QUERY_TYPE_PURIFIER, QUERY_TYPE_EMERGEMCY_STOP,
-    HEAD_TYPE_PRINTING,
-    HEAD_TYPE_3DP
+    WRITE_SOURCE_SENDER,
+    WRITE_SOURCE_UNKNOWN
 } from '../constants';
+import Marlin from './Marlin';
 
 // % commands
 const WAIT = '%wait';
 
 const log = logger('controller:Marlin');
 
-class MarlinController {
+class MarlinController extends EventEmitter {
     type = MARLIN;
 
     // Connections
@@ -51,7 +56,7 @@ class MarlinController {
     // SerialPort
     options = {
         port: '',
-        baudRate: 115200,
+        baudRate: DEFAULT_BAUDRATE,
         connectionTimeout: 3000
     };
 
@@ -62,7 +67,7 @@ class MarlinController {
             if (this.controller.state.hexModeEnabled) {
                 this.emitAll('transfer:hex', { data: Buffer.from(data, 'utf-8') });
             }
-            log.silly(`< ${data}`);
+            // log.silly(`< ${data}`);
             this.controller.parse(String(data));
         },
         close: (err) => {
@@ -154,7 +159,9 @@ class MarlinController {
 
     queryState = (() => {
         let index = 0;
-        const typeOf3dp = [QUERY_TYPE_POSITION, QUERY_TYPE_TEMPERATURE, QUERY_TYPE_ENCLOSURE, QUERY_TYPE_PURIFIER, QUERY_TYPE_EMERGEMCY_STOP, QUERY_TYPE_ORIGIN_OFFSET];
+        const typeOf3dp = [
+            QUERY_TYPE_POSITION, QUERY_TYPE_TEMPERATURE, QUERY_TYPE_ENCLOSURE, QUERY_TYPE_PURIFIER, QUERY_TYPE_EMERGEMCY_STOP, QUERY_TYPE_ORIGIN_OFFSET
+        ];
         const type = [QUERY_TYPE_POSITION, QUERY_TYPE_ORIGIN_OFFSET, QUERY_TYPE_ENCLOSURE, QUERY_TYPE_EMERGEMCY_STOP, QUERY_TYPE_PURIFIER];
 
         return () => {
@@ -220,6 +227,8 @@ class MarlinController {
     };
 
     constructor(options) {
+        super();
+
         const { port, dataSource, baudRate, connectionTimeout = 3000 } = options;
 
         this.options = {
@@ -229,6 +238,7 @@ class MarlinController {
             baudRate,
             connectionTimeout
         };
+
         // Event Trigger
         this.event = new EventTrigger((event, trigger, commands) => {
             log.debug(`EventTrigger: event="${event}", trigger="${trigger}", commands="${commands}"`);
@@ -294,7 +304,7 @@ class MarlinController {
                 return;
             }
 
-            if (this.workflow.state !== WORKFLOW_STATE_RUNNING) {
+            if (this.workflow.state !== WORKFLOW_STATUS_RUNNING) {
                 log.error(`Unexpected workflow state: ${this.workflow.state}`);
                 return;
             }
@@ -350,15 +360,20 @@ class MarlinController {
 
         this.controller.on('firmware', (res) => {
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
         this.controller.on('series', (res) => {
+            let machineIdentifier = '';
+            if (res.seriesSize === 'Ray2023') {
+                machineIdentifier = 'Ray';
+            }
+
+            this.checkMachineIsReady({ machineIdentifier });
+
             log.silly(`controller.on('series'): source=${this.history.writeSource},
                  line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -366,7 +381,6 @@ class MarlinController {
             log.silly(`controller.on('home'): source=${this.history.writeSource},
                  line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -374,7 +388,6 @@ class MarlinController {
             // log.silly(`controller.on('originOffset'): source=${this.history.writeSource},
             //      line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -382,7 +395,6 @@ class MarlinController {
             // log.silly(`controller.on('originOffset'): source=${this.history.writeSource},
             //      line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -390,7 +402,6 @@ class MarlinController {
             // log.silly(`controller.on('originOffset'): source=${this.history.writeSource},
             //      line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -398,7 +409,6 @@ class MarlinController {
             // log.silly(`controller.on('originOffset'): source=${this.history.writeSource},
             //      line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -406,32 +416,28 @@ class MarlinController {
             log.silly(`controller.on('headType'): source=${this.history.writeSource},
                  line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
         this.controller.on('pos', (res) => {
-            log.silly(`controller.on('pos'): source=${this.history.writeSource}, line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
+            // log.silly(`controller.on('pos'): source=${this.history.writeSource},
+            // line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
         this.controller.on('temperature', (res) => {
-            if (!this.ready) {
-                this.ready = true;
-                this.emitAll('connection:connected', { state: this.controller.state, dataSource, type: 'serial' });
-            }
-            log.silly(`controller.on('temperature'): source=${this.history.writeSource},
-                line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
+            // this.checkMachineIsReady();
+
+            // log.silly(`controller.on('temperature'): source=${this.history.writeSource},
+            //    line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER, WRITE_SOURCE_SENDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
+
         this.controller.on('enclosure', (res) => {
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -442,7 +448,6 @@ class MarlinController {
         });
         this.controller.on('selected', (res) => {
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
             }
         });
@@ -469,14 +474,12 @@ class MarlinController {
             this.emergencyStop();
         });
         this.controller.on('ok', (res) => {
-            log.silly(`controller.on('ok'): source=${this.history.writeSource}, line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
+            // log.silly(`controller.on('ok'): source=${this.history.writeSource}, line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             // Display info to console, if this is from user-input
             if (res) {
                 if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
-                    // this.emitAll('serialport:read', res.raw);
                     this.emitAll('serialport:read', { data: res.raw });
                 } else if (!this.history.writeSource) {
-                    // this.emitAll('serialport:read', res.raw);
                     // this.emitAll('serialport:read', { data: res.raw });
                     // log.error('"history.writeSource" should NOT be empty');
                 }
@@ -500,7 +503,7 @@ class MarlinController {
             }
 
             // Sender
-            if (this.workflow.state === WORKFLOW_STATE_RUNNING) {
+            if (this.workflow.state === WORKFLOW_STATUS_RUNNING) {
                 // Check hold state
                 if (this.sender.state.hold) {
                     const { sent, received } = this.sender.state;
@@ -513,7 +516,7 @@ class MarlinController {
                 this.sender.multipleNext();
                 return;
             }
-            if (this.workflow.state === WORKFLOW_STATE_PAUSED) {
+            if (this.workflow.state === WORKFLOW_STATUS_PAUSED) {
                 const { sent, received } = this.sender.state;
                 if (sent > received) {
                     this.sender.ack();
@@ -524,7 +527,6 @@ class MarlinController {
         });
 
         this.controller.on('echo', (res) => {
-            // this.emitAll('serialport:read', res.raw);
             this.emitAll('serialport:read', { data: res.raw });
         });
 
@@ -533,13 +535,12 @@ class MarlinController {
             this.feeder.next();
 
             // Sender
-            if (this.workflow.state === WORKFLOW_STATE_RUNNING) {
+            if (this.workflow.state === WORKFLOW_STATUS_RUNNING) {
                 const { lines, received } = this.sender.state;
                 const line = lines[received] || '';
 
                 // this.emitAll('serialport:read', `> ${line.trim()} (line=${received + 1})`);
                 this.emitAll('serialport:read', { data: `> ${line.trim()} (line=${received + 1})` });
-                // this.emitAll('serialport:read', res.raw);
                 this.emitAll('serialport:read', { data: res.raw });
 
                 this.sender.ack();
@@ -547,7 +548,6 @@ class MarlinController {
                 return;
             }
 
-            // this.emitAll('serialport:read', res.raw);
             this.emitAll('serialport:read', { data: res.raw });
         });
 
@@ -696,6 +696,7 @@ class MarlinController {
             log.error(`Cannot open serial port "${port}/${dataSource}"`);
             return;
         }
+
         this.serialport = new SerialConnection({
             ...this.options,
             isScreenProtocol: false,
@@ -804,8 +805,8 @@ class MarlinController {
             callback(); // register controller
 
             // Make sure machine is ready.
-            setTimeout(() => this.writeln('M1005'));
-            setTimeout(() => this.writeln('M1006'), 100);
+            setTimeout(() => this.writeln('M1006'));
+            setTimeout(() => this.writeln('M1005'), 100);
             setTimeout(() => this.writeln('M1007'), 150);
             setTimeout(() => this.writeln('M1010'), 200);
             setTimeout(() => this.writeln('M1011'), 200);
@@ -819,8 +820,8 @@ class MarlinController {
                 }
 
                 // send M1005 to get firmware version (only support versions >= '2.2')
-                setTimeout(() => this.writeln('M1005'));
-                setTimeout(() => this.writeln('M1006'), 100);
+                setTimeout(() => this.writeln('M1006'));
+                setTimeout(() => this.writeln('M1005'), 100);
                 setTimeout(() => this.writeln('M1007'), 150);
                 setTimeout(() => this.writeln('M1010'), 200);
                 setTimeout(() => this.writeln('M1011'), 200);
@@ -933,7 +934,13 @@ class MarlinController {
         //
         const { dataSource } = this.options;
         if (!isEmpty(this.state)) {
-            socket.emit('Marlin:state', { state: this.state, dataSource });
+            socket.emit('Marlin:state', {
+                state: {
+                    ...this.state,
+                    status: this.workflow.state
+                },
+                dataSource
+            });
         }
         if (!isEmpty(this.settings)) {
             socket.emit('Marlin:settings', { settings: this.settings, dataSource });
@@ -978,6 +985,21 @@ class MarlinController {
             const socket = this.connections[id];
             socket.emit(eventName, { ...options, dataSource: this.options.dataSource });
         });
+    }
+
+    checkMachineIsReady({ machineIdentifier }) {
+        if (!this.ready) {
+            this.ready = true;
+
+            this.emitAll('connection:connected', {
+                state: this.controller.state,
+                dataSource: 'text',
+                type: 'serial',
+                connectionType: 'serial'
+            });
+
+            this.emit('Ready', { machineIdentifier });
+        }
     }
 
     command(socket, cmd, ...args) {
@@ -1176,6 +1198,10 @@ class MarlinController {
                 // No executing command && sender is not sending.
                 if (!this.lastCmdType && this.sender.size() === 0 && !this.feeder.isPending()) {
                     this.feeder.next();
+                }
+
+                if (includes(commands, 'G28')) {
+                    this.controller.state.isHomed = true;
                 }
             },
             'watchdir:load': () => {

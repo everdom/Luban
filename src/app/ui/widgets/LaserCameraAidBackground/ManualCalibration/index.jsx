@@ -4,14 +4,13 @@ import classNames from 'classnames';
 import PropTypes from 'prop-types';
 import i18n from '../../../../lib/i18n';
 import api from '../../../../api';
-import CalibrationPreview from './ManualCalibration';
+import CalibrationPreview, { CALIBRATION_MODE } from './ManualCalibration';
 // import Anchor from '../../../components/Anchor';
 import Modal from '../../../components/Modal';
 import { Button } from '../../../components/Buttons';
 
 import styles from '../styles.styl';
 import { EXPERIMENTAL_LASER_CAMERA } from '../../../../constants';
-
 
 class ManualCalibration extends PureComponent {
     static propTypes = {
@@ -24,7 +23,8 @@ class ManualCalibration extends PureComponent {
         displayExtractTrace: PropTypes.func.isRequired,
         calibrationOnOff: PropTypes.func.isRequired,
         updateStitchEach: PropTypes.func.isRequired,
-        updateAffinePoints: PropTypes.func.isRequired
+        updateAffinePoints: PropTypes.func.isRequired,
+        series: PropTypes.string.isRequired
     };
 
     calibrationPreview = React.createRef();
@@ -36,14 +36,15 @@ class ManualCalibration extends PureComponent {
     };
 
     actions = {
-        onClickToUpload: () => {
+        onClickToUpload: (initialized = false) => {
             api.cameraCalibrationPhoto({ 'address': this.props.server.address, 'toolHead': this.props.toolHead.laserToolhead }).then((res) => {
+                // const { fileName } = JSON.parse(res.text);
                 const { fileName, width, height } = JSON.parse(res.text);
                 this.setState({
                     width,
                     height
                 });
-                this.calibrationPreview.current.onChangeImage(fileName, width, height);
+                this.calibrationPreview.current.onChangeImage(fileName, width, height, initialized);
             });
             this.setState({
                 isComfirmPoints: false
@@ -68,8 +69,8 @@ class ManualCalibration extends PureComponent {
             const { address } = this.props.server;
             if (matrix.points !== this.props.getPoints) {
                 for (let i = 0; i < matrix.points.length; i++) {
-                    matrix.points[i].x = Math.floor(this.props.getPoints[i].x);
-                    matrix.points[i].y = Math.floor(this.props.getPoints[i].y);
+                    matrix.points[i].x = this.props.getPoints[i].x;
+                    matrix.points[i].y = this.props.getPoints[i].y;
                 }
                 await api.setCameraCalibrationMatrix({ 'address': address, 'toolHead': this.props.toolHead.laserToolhead, 'matrix': JSON.stringify(matrix) });
             }
@@ -95,8 +96,11 @@ class ManualCalibration extends PureComponent {
                     <div className={styles['laser-set-background-modal-content']}>
                         <div className={styles['calibrate-background']}>
                             <div className={styles['calibrate-advise']}>
-                                <p style={{ marginBottom: '1rem', textAlign: 'left', width: '522px' }}>
-                                    {i18n._('key-Laser/CamaeraCapture-Align the four corners of the blue quadrilateral with the engraved square.') }
+                                <p style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                                    1. {i18n._('key-Laser/CamaeraCapture-Align the four corners of the blue quadrilateral with the engraved square.')}
+                                </p>
+                                <p style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                                    2. {i18n._('key-Laser/CamaeraCapture-Fine-tune the position of the four corners')}
                                 </p>
                             </div>
 
@@ -107,6 +111,10 @@ class ManualCalibration extends PureComponent {
                             width={this.state.width}
                             height={this.state.height}
                             updateAffinePoints={this.props.updateAffinePoints}
+                            mode={CALIBRATION_MODE}
+                            series={this.props.series}
+                            size={this.props.size}
+                            toolHead={this.props.toolHead}
                         />
 
                         <div className={classNames(
@@ -119,7 +127,7 @@ class ManualCalibration extends PureComponent {
                                 width="160px"
                                 priority="level-three"
                                 type="default"
-                                onClick={this.actions.onClickToUpload}
+                                onClick={() => this.actions.onClickToUpload(true)}
                             >
                                 {i18n._('key-Laser/CameraCapture-Reset')}
                             </Button>
@@ -171,10 +179,15 @@ class ManualCalibration extends PureComponent {
 }
 
 const mapStateToProps = (state) => {
-    const machine = state.machine;
+    const { series, size } = state.machine;
+    const { server } = state.workspace;
     return {
-        server: machine.server,
-        size: machine.size
+        // machine
+        series,
+        size,
+
+        // connected machine
+        server,
     };
 };
 

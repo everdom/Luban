@@ -2,6 +2,10 @@ import React, { PureComponent } from 'react';
 // import Sortable from 'react-sortablejs';
 import PropTypes from 'prop-types';
 import classNames from 'classnames';
+// import i18next from 'i18next';
+// import { includes } from 'lodash';
+// import { longLang } from '../../constants';
+import { Spin } from 'antd';
 import styles from './styles/project.styl';
 
 class ProjectLayout extends PureComponent {
@@ -10,17 +14,14 @@ class ProjectLayout extends PureComponent {
         children: PropTypes.array,
         renderModalView: PropTypes.func,
         renderMainToolBar: PropTypes.func,
-        renderSubToolBar: PropTypes.func
+        isContentLoading: PropTypes.bool
     };
 
-    state = {
-    };
+    state = {};
 
     centerView = React.createRef();
 
     rightView = React.createRef();
-
-    subToolBar = React.createRef();
 
     componentDidMount() {
         window.addEventListener('resize', this.resizeWindow, false);
@@ -32,68 +33,57 @@ class ProjectLayout extends PureComponent {
 
     resizeWindow = () => {
         const rightView = this.rightView.current;
-        const subToolBar = this.subToolBar.current;
         const centerView = this.centerView.current;
         if (centerView) {
-            centerView.style.width = `calc(100vw - ${rightView.clientWidth}px - ${subToolBar.clientWidth}px)`;
+            centerView.style.width = `calc(100vw - ${rightView.clientWidth}px)`;
         }
-    }
+    };
 
     render() {
-        const { renderRightView, children, renderMainToolBar, renderSubToolBar, renderModalView } = this.props;
+        const { renderRightView, children, renderMainToolBar, renderModalView } = this.props;
         return (
-            <div>
-                <div
-                    className={classNames(
-                        styles['main-bar'],
-                        'clearfix'
-                    )}
-                >
-                    {renderMainToolBar && (
-                        renderMainToolBar()
-                    )}
+            <div className={styles['project-layout']}>
+                <div className={classNames(styles['main-toolbar'], 'clearfix')}>
+                    {
+                        renderMainToolBar && (
+                            renderMainToolBar()
+                        )
+                    }
                 </div>
-                <div className={styles['content-flex']}>
+                <Spin spinning={this.props.isContentLoading || false}>
                     <div
-                        ref={this.rightView}
                         className={classNames(
-                            styles.controls,
-                            'overflow-x-hidden',
-                            'border-radius-8',
-                            styles['controls-right'],
-                            'box-shadow-module'
+                            styles['content-flex'],
+                            // {
+                            //     [styles['long-lang-content-height']]: includes(longLang, i18next.language),
+                            // }
                         )}
                     >
-                        {renderRightView && (
-                            renderRightView()
-                        )}
+                        <div
+                            ref={this.rightView}
+                            className={classNames(styles['configuration-panel'])}
+                        >
+                            {
+                                renderRightView && (
+                                    renderRightView()
+                                )
+                            }
+                        </div>
+
+                        <div
+                            ref={this.centerView}
+                            className={classNames(styles.visualizer)}
+                        >
+                            {children}
+                        </div>
+
+                        {
+                            renderModalView && (
+                                renderModalView()
+                            )
+                        }
                     </div>
-
-                    <div
-                        ref={this.centerView}
-                        className={classNames(
-                            styles.visualizer,
-                        )}
-                    >
-                        {children}
-                    </div>
-
-                    <div
-                        ref={this.subToolBar}
-                        className={classNames(
-                            styles['sub-bar'],
-                        )}
-                    >
-                        {renderSubToolBar && (
-                            renderSubToolBar()
-                        )}
-                    </div>
-
-                    {renderModalView && (
-                        renderModalView()
-                    )}
-
-                </div>
+                </Spin>
             </div>
         );
     }

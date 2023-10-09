@@ -1,5 +1,6 @@
-import { DATA_PREFIX } from '../constants';
-import { coordGmSvgToModel, getBBox } from '../ui/SVGEditor/element-utils';
+import { isInside } from 'overlap-area';
+import { DATA_PREFIX, MINIMUM_WIDTH_AND_HEIGHT } from '../constants';
+import { coordGmSvgToModel } from '../ui/SVGEditor/element-utils';
 
 // import { remapElement } from '../../widgets/SVGEditor/element-recalculate';
 import { NS } from '../ui/SVGEditor/lib/namespaces';
@@ -50,17 +51,27 @@ function genModelConfig(elem, size, materials = {}) {
         }
         coord.positionX = 0;
     }
+
+    const isDraw = elem.getAttribute('id')?.includes('graph');
     if (elem.nodeName === 'path') {
-        coord.positionX = +elem.getAttribute('x') + coord.width / 2 * coord.scaleX - size.x;
-        coord.positionY = size.y - (+elem.getAttribute('y')) - coord.height / 2 * coord.scaleY;
-        deltaLeftX = 0.5;
-        deltaRightX = 1;
-        deltaTopY = 0.5;
-        deltaBottomY = 1;
+        if (!isDraw) {
+            coord.positionX = +elem.getAttribute('x') + coord.width / 2 * coord.scaleX - size.x;
+            coord.positionY = size.y - (+elem.getAttribute('y')) - coord.height / 2 * coord.scaleY;
+            deltaLeftX = 0.5;
+            deltaRightX = 1;
+            deltaTopY = 0.5;
+            deltaBottomY = 1;
+        }
     }
 
     // eslint-disable-next-line prefer-const
     let { x, y, width, height, positionX, positionY, scaleX, scaleY } = coord;
+    if (!width) {
+        width = MINIMUM_WIDTH_AND_HEIGHT;
+    }
+    if (!height) {
+        height = MINIMUM_WIDTH_AND_HEIGHT;
+    }
     // leave a little space for line width
     let vx = (x - deltaLeftX) * scaleX;
     let vy = (y - deltaTopY) * scaleY;
@@ -70,9 +81,24 @@ function genModelConfig(elem, size, materials = {}) {
     width *= scaleX;
     height *= scaleY;
 
-    const clone = elem.cloneNode(true);
-    clone.setAttribute('transform', `scale(${scaleX} ${scaleY})`);
-    clone.setAttribute('font-size', clone.getAttribute('font-size'));
+    let modelContent = '';
+    if (elem instanceof SVGPathElement && isDraw) {
+        const path = elem.getAttribute('d');
+        const paths = SvgModel.calculationPath(path);
+        const segments = paths.map(item => {
+            const clone = elem.cloneNode(true);
+            clone.setAttribute('d', item);
+            clone.setAttribute('transform', 'scale(1 1)');
+            clone.setAttribute('font-size', clone.getAttribute('font-size'));
+            return new XMLSerializer().serializeToString(clone);
+        });
+        modelContent = segments.join('');
+    } else {
+        const clone = elem.cloneNode(true);
+        clone.setAttribute('transform', `scale(${scaleX} ${scaleY})`);
+        clone.setAttribute('font-size', clone.getAttribute('font-size'));
+        modelContent = new XMLSerializer().serializeToString(clone);
+    }
 
     if (scaleX < 0) {
         vx += vwidth;
@@ -85,7 +111,7 @@ function genModelConfig(elem, size, materials = {}) {
     // Todo: need to optimize
     const content = `<svg x="0" y="0" width="${vwidth}mm" height="${vheight}mm" `
         + `viewBox="${vx} ${vy} ${vwidth} ${vheight}" `
-        + `xmlns="http://www.w3.org/2000/svg">${new XMLSerializer().serializeToString(clone)}</svg>`;
+        + `xmlns="http://www.w3.org/2000/svg">${modelContent}</svg>`;
     const model = {
         modelID: elem.getAttribute('id'),
         content: content,
@@ -136,6 +162,8 @@ function transformBox(x, y, w, h, m) {
 
 class SVGActionsFactory {
     selectedSvgModels = [];
+
+    drawModel = null;
 
     selectedElementsTransformation = {
         x: 0,
@@ -191,7 +219,7 @@ class SVGActionsFactory {
 
     addImageBackgroundToSVG(options) {
         const { x, y, width, height } = coordGmModelToSvg(this.size, options.transformation);
-        const uploadPath = `${DATA_PREFIX}/${options.uploadName}`;
+        const uploadPath = /^blob:/.test(options.uploadName) ? options.uploadName : `${DATA_PREFIX}/${options.uploadName}`;
         const elem = this.svgContentGroup.addSVGBackgroundElement({
             element: 'image',
             attr: {
@@ -218,6 +246,13 @@ class SVGActionsFactory {
         selected.setAttribute('href', imagePath);
     }
 
+    updateSelectedElementsUniformScalingState(uniformScalingState) {
+        const selectedSVGModels = this.selectedSvgModels;
+        if (selectedSVGModels.length === 1) {
+            selectedSVGModels[0].updateTransformation({ uniformScalingState });
+        }
+    }
+
     updateSvgModelImage(svgModel, imageName) {
         const imagePath = `${DATA_PREFIX}/${imageName}`;
         svgModel.elem.setAttribute('href', imagePath);
@@ -231,8 +266,8 @@ class SVGActionsFactory {
         this.svgContentGroup.deleteElements(selectedElements);
     }
 
-    bringElementToFront() {
-        const selected = this.svgContentGroup.getSelected();
+    bringElementToFront(model) {
+        const selected = model || this.svgContentGroup.getSelected();
         if (!selected) {
             return;
         }
@@ -268,85 +303,6 @@ class SVGActionsFactory {
         if (childNodes[index] && childNodes[index - 1]) {
             const item = childNodes[index];
             this.svgContentGroup.group.insertBefore(item, childNodes[0]);
-        }
-    }
-
-    // multi select
-    /**
-     *
-     * @param transformation
-     *
-     *      - uniformScalingState
-     *      - positionX, positionY,
-     *      - rotationZ
-     *      - scaleX, scaleY, width, height
-     */
-    updateSelectedElementsTransformation(transformation) {
-        const selectedSVGModels = this.selectedSvgModels;
-        const elements = this.svgContentGroup.selectedElements;
-        if (elements.length === 0) {
-            return;
-        }
-
-        const { uniformScalingState, rotationZ, scaleX, scaleY, width, height } = transformation;
-        let { positionX, positionY } = transformation;
-
-        // Update uniform scaling state
-        if (uniformScalingState !== undefined) {
-            if (selectedSVGModels.length === 1) {
-                const model = selectedSVGModels[0];
-                model.updateTransformation({ uniformScalingState: transformation.uniformScalingState });
-            }
-        }
-
-        // Update Position X, Y
-        if (positionX !== undefined || positionY !== undefined) {
-            const transformationOld = this.modelGroup.getSelectedModelTransformation();
-            if (positionX === undefined) {
-                positionX = transformationOld.positionX;
-            }
-            if (positionY === undefined) {
-                positionY = transformationOld.positionY;
-            }
-
-            const dx = positionX - transformationOld.positionX;
-            const dy = -(positionY - transformationOld.positionY);
-
-            // Modifications on SVG Element
-            // mouse down (create createSVGTransform = translate(0, 0))
-            this.svgContentGroup.translateSelectedElementsOnMouseDown();
-            const transform = svg.createSVGTransform();
-            transform.setTranslate(dx, dy);
-
-            // mouse move (replace SVGTransform)
-            this.svgContentGroup.translateSelectedElementsOnMouseMove(transform);
-
-            this.updateSelectedModelsByTransformation({ dx, dy });
-        }
-
-        // Update rotation
-        if (rotationZ !== undefined) {
-            // mouse up
-            const { x: cx, y: cy } = this.svgContentGroup.operatorPoints.getCenterPoint();
-
-            // calculate delta angle from rotationZ
-            const angle = -rotationZ * 180 / Math.PI;
-            const angleOld = -this.modelGroup.getSelectedModelTransformation().rotationZ * 180 / Math.PI; // always 0
-            const deltaAngle = (angle - angleOld + 540) % 360 - 180;
-
-            //
-            this.updateSelectedModelsByTransformation({ cx, cy, deltaAngle });
-        }
-
-        // Update scale
-        if ((scaleX !== undefined || scaleY !== undefined)) {
-            this.updateSelectedModelsByTransformation({
-                scaleX, width, scaleY, height
-            });
-        }
-
-        for (const model of selectedSVGModels) {
-            model.onTransform();
         }
     }
 
@@ -401,14 +357,15 @@ class SVGActionsFactory {
     hideSelectedElement() {
         const selectedElement = this.svgContentGroup.getSelected();
         selectedElement.visible = false;
-        selectedElement.setAttribute('display', 'none');
+        // Set display=none will result in getbbox.width equal to 0, So use the visibility property to control the display state
+        selectedElement.setAttribute('visibility', 'hidden');
         this.svgContentGroup.showSelectorGrips(false);
     }
 
     showSelectedElement() {
         const selectedElement = this.svgContentGroup.getSelected();
         selectedElement.visible = true;
-        selectedElement.setAttribute('display', 'inherit');
+        selectedElement.setAttribute('visibility', 'visible');
         this.svgContentGroup.showSelectorGrips(true);
 
         const t = SVGActionsFactory.calculateElementsTransformation(this.getSelectedElements());
@@ -452,136 +409,20 @@ class SVGActionsFactory {
     // TODO: move out as a helper function.
 
 
-    /**
-     *
-     * @param deviation
-     *      - dx, dy
-     *      - cx, cy, deltaAngle
-     *      - scaleX
-     *      - scaleY
-     */
-    updateSelectedModelsByTransformation(deviation) { // todo, just after move now
-        const elements = this.svgContentGroup.selectedElements;
 
-        const selectedModels = this.selectedSvgModels;
-        const selectedModelsTransformation = this.modelGroup.getSelectedModelTransformation();
-        const transformation = {
-            positionX: selectedModelsTransformation.positionX,
-            positionY: selectedModelsTransformation.positionY,
-            rotationZ: selectedModelsTransformation.rotationZ,
-            scaleX: selectedModelsTransformation.scaleX,
-            scaleY: selectedModelsTransformation.scaleY
-        };
-
-        // comeback to transform before mouse down
-        // for (const svgModel of selectedModels) {
-        //     this.setElementTransformToList(this.svgContentGroup.operatorPoints.operatorPointsGroup.transform.baseVal, svgModel.relatedModel.transformation);
-        // }
-
-        // translate after mouseup
-        if (deviation.dx || deviation.dy) {
-            // translate models
-            for (const svgModel of selectedModels) {
-                svgModel.onUpdate();
-            }
-
-            // translate operationGrips
-            transformation.positionX = selectedModelsTransformation.positionX + deviation.dx;
-            transformation.positionY = selectedModelsTransformation.positionY - deviation.dy;
-        }
-
-        // rotate after mouseup
-        if (deviation.deltaAngle) {
-            // translate and rotate models
-
-            // FIXME
-            for (const model of selectedModels) {
-                const elem = model.elem;
-
-                const rotateBox = svg.createSVGTransform();
-                rotateBox.setRotate(deviation.deltaAngle, deviation.cx, deviation.cy);
-
-                const startBbox = getBBox(elem);
-                const startCenter = svg.createSVGPoint();
-                startCenter.x = startBbox.x + startBbox.width / 2;
-                startCenter.y = startBbox.y + startBbox.height / 2;
-
-                const endCenter = startCenter.matrixTransform(rotateBox.matrix);
-                // why model new center?
-                const modelNewCenter = model.pointSvgToModel(endCenter);
-
-                const rotationZ = ((model.transformation.rotationZ * 180 / Math.PI - deviation.deltaAngle + 540) % 360 - 180) * Math.PI / 180;
-                const positionX = modelNewCenter.x;
-                const positionY = modelNewCenter.y;
-
-                // <path> cannot use this
-                // because it has no xy
-                if (model.type !== 'path') {
-                    model.updateAndRefresh({
-                        transformation: {
-                            positionX: positionX,
-                            positionY: positionY,
-                            rotationZ: rotationZ
-                        }
-                    });
-                } else {
-                    // TODO: sometimes cannot move right position
-                    model.updateAndRefresh({
-                        transformation: {
-                            rotationZ: rotationZ
-                        }
-                    });
-
-                    const transform = svg.createSVGTransform();
-                    transform.setTranslate(modelNewCenter.x - model.transformation.positionX, -(modelNewCenter.y - model.transformation.positionY));
-                    const transformList = elem.transform.baseVal;
-                    transformList.insertItemBefore(transform, 0);
-                    model.onUpdate();
-                }
-            }
-
-            // for (const svgModel of selectedModels) {
-            //     svgModel.onUpdate();
-            // }
-
-            // rotate operationGrips
-            transformation.rotationZ = ((transformation.rotationZ * 180 / Math.PI - deviation.deltaAngle + 180) % 360 - 180) * Math.PI / 180;
-        }
-
-        if (deviation.scaleX !== undefined || deviation.scaleY !== undefined) {
-            const element = elements[0];
-            const model = this.getSVGModelByElement(element);
-
-            if (deviation.scaleX !== undefined) {
-                model.updateAndRefresh({
-                    transformation: {
-                        width: deviation.width,
-                        scaleX: deviation.scaleX
-                    }
-                });
-            }
-            if (deviation.scaleY !== undefined) {
-                model.updateAndRefresh({
-                    transformation: {
-                        height: deviation.height,
-                        scaleY: deviation.scaleY
-                    }
-                });
-            }
-        }
-
-        this.modelGroup.updateSelectedGroupTransformation(transformation);
-        this.resetSelection();
-    }
-
-    addSelectedSvgModelsByModels(models) {
+    addSelectedSvgModelsByModels(models, isRotate = false) {
         this.modelGroup.addSelectedModels(models);
 
+        const isSelectedRotate3D = isRotate && models.find((model) => {
+            return model.sourceType === 'image3d';
+        });
+
+        // Add each model to selected models, and recalculate selected group's transformation
         for (const model of models) {
             if (!this.selectedSvgModels.includes(model)) {
                 this.selectedSvgModels.push(model);
                 // todo
-                const posAndSize = this.svgContentGroup.addToSelection([model.elem]);
+                const posAndSize = this.svgContentGroup.addToSelection([model.elem], isSelectedRotate3D);
                 this.modelGroup.updateSelectedGroupTransformation({
                     positionX: posAndSize.positionX - this.size.x,
                     positionY: this.size.y - posAndSize.positionY,
@@ -590,8 +431,16 @@ class SVGActionsFactory {
                 });
             }
         }
+
         const t = SVGActionsFactory.calculateElementsTransformation(this.getSelectedElements());
         this._setSelectedElementsTransformation(t);
+    }
+
+    setSelectedSvgModelsByModels(models) {
+        this.modelGroup.selectedModelArray = models;
+        this.selectedSvgModels = models;
+        const elems = models.map(model => model.elem);
+        this.svgContentGroup.setSelection(elems);
     }
 
     resetSelection() {
@@ -636,7 +485,10 @@ class SVGActionsFactory {
             const INDEXMARGIN = 0.02;
             svgModel.elem.id = svgModel.modelID;
             svgModel.setParent(this.svgContentGroup.group);
-            svgModel.modelName = this.modelGroup._createNewModelName(svgModel);
+            svgModel.setPreSelection(this.svgContentGroup.preSelectionGroup);
+            const modelNameObj = this.modelGroup._createNewModelName(svgModel);
+            svgModel.modelName = modelNameObj.name;
+            svgModel.baseName = modelNameObj.baseName;
             this.modelGroup.resetModelsPositionZByOrder();
             svgModel.transformation.positionZ = (this.modelGroup.models.length + 1) * INDEXMARGIN;
             svgModel.onTransform();
@@ -686,8 +538,8 @@ class SVGActionsFactory {
                     elemConfig['font-family'] = res.body.family;
                 }
                 textSize = computeTransformationSizeForTextVector(newConfig.text, newConfig['font-size'], newConfig['line-height'], {
-                    width: res.body?.width,
-                    height: res.body?.height
+                    width: res.body?.sourceWidth,
+                    height: res.body?.sourceHeight
                 });
             } else {
                 const blob = new Blob([content], { type: 'image/svg+xml' });
@@ -697,7 +549,7 @@ class SVGActionsFactory {
                 formData.append('image', file);
                 res = await api.uploadImage(formData);
             }
-            const { originalName, uploadName, width, height } = res.body;
+            const { originalName, uploadName, sourceWidth, sourceHeight } = res.body;
             const sourceType = 'svg';
             const mode = 'vector';
             let { config, gcodeConfig } = generateModelDefaultConfigs(headType, sourceType, mode, isRotate);
@@ -712,8 +564,8 @@ class SVGActionsFactory {
                 mode,
                 originalName,
                 uploadName,
-                sourceWidth: width,
-                sourceHeight: height,
+                sourceWidth: sourceWidth,
+                sourceHeight: sourceHeight,
                 width: isText ? textSize.width : dataWidth,
                 height: isText ? textSize.height : dataHeight,
                 transformation,
@@ -722,9 +574,9 @@ class SVGActionsFactory {
                 elem: element,
                 size: this.size
             };
-
             const svgModel = this.modelGroup.addModel(options);
             svgModel.setParent(this.svgContentGroup.group);
+            svgModel.setPreSelection(this.svgContentGroup.preSelectionGroup);
             return svgModel;
         } catch (e) {
             console.error(e);
@@ -732,7 +584,43 @@ class SVGActionsFactory {
         }
     }
 
-    selectAllElements() {
+    updateElementToImage(element, options) {
+        if (element.nodeName === 'image') {
+            return;
+        }
+        const model = this.getSVGModelByElement(element);
+
+        const transformList = SvgModel.getTransformList(element);
+        const scaleX = transformList.getItem(2).matrix.a;
+        const scaleY = transformList.getItem(2).matrix.d;
+        const angle = transformList.getItem(1).angle;
+
+        this.svgContentGroup.deleteElement(element);
+        const { x, y, width, height } = coordGmModelToSvg(this.size, options.transformation);
+        const newElement = this.svgContentGroup.addSVGElement({
+            element: 'image',
+            attr: {
+                id: model.modelID,
+                x: x,
+                y: y,
+                width: width,
+                height: height,
+                href: `${DATA_PREFIX}/${options.processImageName}`,
+            }
+        });
+
+        SvgModel.recalculateElementTransformList(newElement, {
+            x: 0,
+            y: 0,
+            scaleX,
+            scaleY,
+            angle
+        });
+
+        model.elem = newElement;
+    }
+
+    selectAllElements(isRotate = false) {
         this.clearSelection();
         const childNodes = this.svgContentGroup.group.children;
         const nodes = [];
@@ -744,7 +632,7 @@ class SVGActionsFactory {
             }
         }
         // this.svgContentGroup.addToSelection(nodes);
-        this.selectElements(nodes);
+        this.selectElements(nodes, isRotate);
     }
 
     /**
@@ -752,8 +640,7 @@ class SVGActionsFactory {
      *
      * @param elements
      */
-    selectElements(elements) {
-        this.svgContentGroup.addToSelection(elements);
+    selectElements(elements, isRotate = false) {
         const svgModels = [];
         for (const svgModel of this.modelGroup.models) {
             if (elements.includes(svgModel.elem)) {
@@ -764,6 +651,10 @@ class SVGActionsFactory {
                 }
             }
         }
+        const isSelectedRotate3D = isRotate && this.selectedSvgModels.find((model) => {
+            return model.sourceType === 'image3d';
+        });
+        this.svgContentGroup.addToSelection(elements, isSelectedRotate3D);
         this.modelGroup.addSelectedModels(svgModels);
 
         const selectedElements = this.svgContentGroup.selectedElements;
@@ -838,14 +729,26 @@ class SVGActionsFactory {
         return this.selectedElementsTransformation;
     }
 
+    isPointInSelectArea(point) {
+        if (this.selectedSvgModels.length === 0) {
+            return false;
+        }
+        return this.selectedSvgModels.some((model) => {
+            return isInside(point, model.vertexPoints);
+        });
+    }
+
     /**
      * Update internal cached variable `selectedElementsTransformation` to `t`.
      *
      * @param t
      * @private
      */
-    _setSelectedElementsTransformation(t) {
-        this.selectedElementsTransformation = t;
+    _setSelectedElementsTransformation(t = {}) {
+        this.selectedElementsTransformation = {
+            ...this.selectedElementsTransformation,
+            ...t
+        };
     }
 
     static calculateElementsTransformation(elements) {
@@ -1571,15 +1474,15 @@ class SVGActionsFactory {
 
         api.convertTextToSvg(newConfig)
             .then(async (res) => {
-                const { originalName, uploadName, width, height } = res.body;
+                const { originalName, uploadName, sourceWidth, sourceHeight } = res.body;
                 const textSize = computeTransformationSizeForTextVector(newConfig.text, newConfig['font-size'], newConfig['line-height'], {
-                    width,
-                    height
+                    width: sourceWidth,
+                    height: sourceHeight
                 });
 
                 const baseUpdateData = {
-                    sourceWidth: width,
-                    sourceHeight: height,
+                    sourceWidth: sourceWidth,
+                    sourceHeight: sourceHeight,
                     width: textSize.width,
                     height: textSize.height,
                     originalName,
@@ -1599,10 +1502,10 @@ class SVGActionsFactory {
                     ...baseUpdateData,
                     config: newConfig
                 });
-                // TODO: change width and height of elements but not apply the scale
-                // const elements = this.svgContentGroup.selectedElements;
-                // const t = SVGActionsFactory.calculateElementsTransformation(elements);
-                // this._setSelectedElementsTransformation(t);
+                this._setSelectedElementsTransformation({
+                    width: baseUpdateData.transformation.width,
+                    height: baseUpdateData.transformation.height,
+                });
 
                 this.resetSelection();
             });

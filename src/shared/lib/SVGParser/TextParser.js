@@ -1,12 +1,11 @@
 import _ from 'lodash';
 import xml2js from 'xml2js';
 import * as opentype from 'opentype.js';
+import svgPath from 'svgpath';
 import BaseTagParser from './BaseTagParser';
 import fontManager from '../FontManager';
 import PathTagParser from './PathTagParser';
 import AttributesParser from './AttributesParser';
-import { xformPoint } from './Utils';
-
 
 const DEFAULT_MILLIMETER_PER_PIXEL = 25.4 / 72;
 const TOLERANCE = 0.3 * DEFAULT_MILLIMETER_PER_PIXEL;
@@ -150,9 +149,9 @@ class textParser extends BaseTagParser {
         const x = attributes.x;
         const y = attributes.y;
         const baselineX = _.isUndefined(previousElementAttributes.positionX)
-            ? 0 : previousElementAttributes.positionX;
+            ? previousElementAttributes.actualX : previousElementAttributes.positionX;
         const baselineY = _.isUndefined(previousElementAttributes.positionY)
-            ? 0 : previousElementAttributes.positionY;
+            ? previousElementAttributes.actualY : previousElementAttributes.positionY;
         let positionX = 0;
         let positionY = 0;
 
@@ -168,15 +167,10 @@ class textParser extends BaseTagParser {
             positionY = actualY + dy;
         }
 
-        const arrPoint = [positionX, positionY];
-        xformPoint(attributes.xform, arrPoint);
-        positionX = arrPoint[0];
-        positionY = arrPoint[1];
         const result = {
             positionX,
             positionY
         };
-
         let addResult = {};
         if (!_.isUndefined(text)) {
             let fontObj = await fontManager.getFont(font);
@@ -185,12 +179,26 @@ class textParser extends BaseTagParser {
             }
             const fullPath = new opentype.Path();
             // Calculate size and render SVG template
-            const p = fontObj.getPath(text, positionX, positionY, Math.floor(size));
-            fullPath.extend(p);
+
+            const fontPath = fontManager.getPathOrDefault(fontObj, text, positionX, positionY, size);
+            // fontPath = fontManager.getPathOrDefault(fontObj, text, positionX - fontPath.width / 2, positionY, size);
+
+            fullPath.extend(fontPath.path);
             fullPath.stroke = 'black';
+            const d = fullPath.toPathData();
+            const newSvgPath = svgPath(d)
+                .matrix(attributes.xform);
+
+            if (this.attributes['text-anchor'] === 'middle') {
+                newSvgPath.translate(-fontPath.width / 2, 0);
+            } else if (this.attributes['text-anchor'] === 'end') {
+                newSvgPath.translate(-fontPath.width, 0);
+            }
+
+            const newPath = newSvgPath.toString();
 
             const gString = _.template(TEMPLATE)({
-                path: fullPath.toSVG()
+                path: `<path d="${newPath}" stroke="black" stroke-width="1"/>`
             });
             addResult = await this.parseString(gString, 'g');
         }

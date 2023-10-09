@@ -1,14 +1,12 @@
-import path from 'path';
-import fs from 'fs';
-import mv from 'mv';
-import includes from 'lodash/includes';
-import request from 'superagent';
-import * as opentype from 'opentype.js';
 import libFontManager from 'font-scanner';
-import logger from 'universal-logger';
+import fs from 'fs';
+import includes from 'lodash/includes';
+import log from 'loglevel';
+import mv from 'mv';
+import * as opentype from 'opentype.js';
+import path from 'path';
+import request from 'superagent';
 
-
-const log = logger('lib:FontManager');
 
 /*
 const WEB_SAFE_FONTS = [
@@ -33,6 +31,8 @@ const WEB_SAFE_FONTS = [
 ];
 */
 
+export const DEFAULT_FONT_NAME = 'NotoSansSC-Regular.otf';
+
 function patchFont(font, displayName = '') {
     if (!font.names.fontFamily) {
         font.names.fontFamily = font.names.fullName;
@@ -43,17 +43,42 @@ function patchFont(font, displayName = '') {
 }
 
 class FontManager {
+    fontDir;
+
     constructor() {
-        this.fontDir = './userData/fonts';
         this.fonts = [];
         // preload fonts config
         this.systemFonts = [];
-        libFontManager.getAvailableFontsSync().forEach((font) => {
-            if (path.extname(font.path).toLocaleLowerCase() !== '.ttc'
-                && this.systemFonts.findIndex(i => i.family === font.family) < 0) {
-                this.systemFonts.push(font);
-            }
-        });
+        this.loadDefaultFont();
+        libFontManager.getAvailableFontsSync()
+            .forEach((font) => {
+                if (path.extname(font.path)
+                    .toLocaleLowerCase() !== '.ttc'
+                    && this.systemFonts.findIndex(i => i.family === font.family) < 0) {
+                    this.systemFonts.push(font);
+                }
+            });
+    }
+
+    async loadDefaultFont() {
+        if (this.defaultFont) {
+            return;
+        }
+        let fontDir;
+        if (process.env.fontDir) {
+            fontDir = process.env.fontDir;
+        } else if (this.fontDir) {
+            fontDir = this.fontDir;
+        }
+        if (!fontDir) {
+            return;
+        }
+        const dir = `${fontDir}/${DEFAULT_FONT_NAME}`;
+        try {
+            this.defaultFont = opentype.loadSync(dir);
+        } catch (e) {
+            log.error(e);
+        }
     }
 
     setFontDir(fontDir) {
@@ -215,6 +240,41 @@ class FontManager {
             .catch((err) => {
                 log.error(err);
             });
+    }
+
+    getPathOrDefault(font, text, positionX, positionY, size) {
+        this.loadDefaultFont();
+        let index = 0;
+        let width = 0;
+        let diffWidth = 0;
+        const fullPath = new opentype.Path();
+
+        font.forEachGlyph(text, positionX, positionY, size, {}, (glyph, gX, gY, gFontSize) => {
+            let glyphPath;
+            const glyphWidth = 1 / font.unitsPerEm * gFontSize * glyph.advanceWidth;
+
+            width += glyphWidth;
+
+            if (glyph.index === 0 && this.defaultFont) {
+                glyph = this.defaultFont.charToGlyph(text[index]);
+
+                const newWidth = 1 / this.defaultFont.unitsPerEm * gFontSize * glyph.advanceWidth;
+
+                glyphPath = glyph.getPath(gX + diffWidth, gY, gFontSize, {}, this.defaultFont);
+
+                diffWidth += newWidth - glyphWidth;
+                width += newWidth - glyphWidth;
+            } else {
+                glyphPath = glyph.getPath(gX + diffWidth, gY, gFontSize, {}, font);
+            }
+            fullPath.extend(glyphPath);
+            index++;
+        });
+
+        return {
+            path: fullPath,
+            width: width
+        };
     }
 }
 

@@ -3,10 +3,35 @@
         "allowJs": true,
         "sourceMap": true,
         "target": "es5",
+        "module": "esnext",
+        "moduleResolution": "node",
+        "resolveJsonModule": true,
+        "isolatedModules": true,
         "noUnusedLocals": true,
-        "esModuleInterop": true
+        "esModuleInterop": true,
+        "strictPropertyInitialization": false,
+        "skipLibCheck": true,
+        "pretty": true,
+        "preserveConstEnums": true,
+        "useDefineForClassFields": true,
+        "noEmit": false,
+        "forceConsistentCasingInFileNames": true,
+        "strictFunctionTypes": true,
+        "downlevelIteration": true,
+        "jsx": "react-jsx",
+        "allowSyntheticDefaultImports": true,
+        "noFallthroughCasesInSwitch": true,
+        "lib": [
+            "dom",
+            "dom.iterable",
+            "esnext"
+        ]
     },
     "include": [
-        "./src/**/*"
+        "./src/**/*", 
+        "packages/luban-platform/**/*.ts"
+    ],
+    "exclude": [
+        "./src/server/lib/SACP-SDK/tests/**/*"
     ]
 }

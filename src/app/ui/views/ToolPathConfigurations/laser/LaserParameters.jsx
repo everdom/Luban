@@ -1,10 +1,13 @@
 import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
+import { includes } from 'lodash';
 import { connect } from 'react-redux';
+
 import i18n from '../../../../lib/i18n';
 import GcodeParameters from './GcodeParameters';
 import { TextInput } from '../../../components/Input';
 import TipTrigger from '../../../components/TipTrigger';
+import { L20WLaserToolModule, L40WLaserToolModule } from '../../../../machines/snapmaker-2-toolheads';
 
 class LaserParameters extends PureComponent {
     static propTypes = {
@@ -21,7 +24,11 @@ class LaserParameters extends PureComponent {
 
         // size: PropTypes.object.isRequired,
         multipleEngine: PropTypes.bool.isRequired,
-        materials: PropTypes.object.isRequired
+        materials: PropTypes.object.isRequired,
+        isModel: PropTypes.bool,
+
+        activeMachine: PropTypes.object,
+        toolHeadIdentifier: PropTypes.string,
     };
 
     state = {
@@ -97,9 +104,13 @@ class LaserParameters extends PureComponent {
     };
 
     render() {
-        const { toolPath, multipleEngine } = this.props;
+        const { toolPath, multipleEngine, activeMachine, toolHeadIdentifier } = this.props;
 
         const { useLegacyEngine, name } = toolPath;
+
+        const zOffsetEnabled = activeMachine.metadata.size.z > 0;
+        const halfDiodeModeEnabled = includes([L40WLaserToolModule.identifier], toolHeadIdentifier);
+        const auxiliaryAirPumpEnabled = includes([L20WLaserToolModule.identifier, L40WLaserToolModule.identifier], toolHeadIdentifier);
 
         return (
             <React.Fragment>
@@ -120,6 +131,7 @@ class LaserParameters extends PureComponent {
                     <TipTrigger
                         title={i18n._('key-Laser/ToolpathParameters-Name')}
                         content={i18n._('key-Laser/ToolpathParameters-Enter the toolpath name.')}
+                        maxWidth="middle"
                     >
                         <div className="position-re sm-flex justify-space-between height-32 margin-vertical-8">
                             <span>{i18n._('key-Laser/ToolpathParameters-Name')}</span>
@@ -139,6 +151,10 @@ class LaserParameters extends PureComponent {
                         isModifiedDefinition={this.props.isModifiedDefinition}
                         setCurrentToolDefinition={this.props.setCurrentToolDefinition}
                         setCurrentValueAsProfile={this.props.setCurrentValueAsProfile}
+                        isModel={this.props.isModel}
+                        zOffsetEnabled={zOffsetEnabled}
+                        halfDiodeModeEnabled={halfDiodeModeEnabled}
+                        auxiliaryAirPumpEnabled={auxiliaryAirPumpEnabled}
                     />
                 </div>
             </React.Fragment>
@@ -147,11 +163,14 @@ class LaserParameters extends PureComponent {
 }
 
 const mapStateToProps = (state) => {
-    const { multipleEngine } = state.machine;
+    const activeMachine = state.machine.activeMachine;
+    const { multipleEngine, toolHead } = state.machine;
     const { materials } = state.laser;
     return {
         multipleEngine,
-        materials
+        materials,
+        activeMachine,
+        toolHeadIdentifier: toolHead.laserToolhead,
     };
 };
 

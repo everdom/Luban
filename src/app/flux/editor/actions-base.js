@@ -1,9 +1,9 @@
+import { MINIMUM_WIDTH_AND_HEIGHT } from '../../constants/index';
 import {
     ACTION_RESET_CALCULATED_STATE,
     ACTION_UPDATE_CONFIG,
     ACTION_UPDATE_GCODE_CONFIG,
     ACTION_UPDATE_STATE,
-    ACTION_UPDATE_TRANSFORMATION
 } from '../actionType';
 
 /**
@@ -25,10 +25,10 @@ export const computeTransformationSizeForTextVector = (text, fontSize, lineHeigh
     let width = height / size.height * size.width;
 
     if (!width) {
-        width = 0.01;
+        width = MINIMUM_WIDTH_AND_HEIGHT;
     }
     if (!height) {
-        height = 0.01;
+        height = MINIMUM_WIDTH_AND_HEIGHT;
     }
 
     return {
@@ -51,15 +51,6 @@ export const baseActions = {
             type: ACTION_UPDATE_STATE,
             headType,
             state
-        };
-    },
-
-    updateTransformation: (headType, transformation) => {
-        checkHeadType(headType);
-        return {
-            type: ACTION_UPDATE_TRANSFORMATION,
-            headType,
-            transformation
         };
     },
 

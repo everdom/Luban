@@ -8,12 +8,12 @@ class TileModal extends PureComponent {
     static propTypes = {
         ...Modal.propTypes,
         closable: PropTypes.bool
-    }
+    };
 
     static defaultProps = {
         ...Modal.defaultProps,
         closable: true
-    }
+    };
 
     componentDidMount() {
         UniApi.Event.emit('tile-modal:show', { component: this.props.children });
@@ -26,10 +26,11 @@ class TileModal extends PureComponent {
     render() {
         return (
             <Modal
+                {...this.props}
                 closable={this.props.closable}
-                wrapClassName="tile-modal"
+                wrapClassName={`tile-modal ${this.props.wrapClassName ? this.props.wrapClassName : ''}`}
                 width="auto"
-                visible
+                open
                 mask={false}
                 footer={null}
                 onCancel={this.props.onClose}

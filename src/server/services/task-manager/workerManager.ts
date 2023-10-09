@@ -1,6 +1,10 @@
 import workerpool, { WorkerPool } from 'workerpool';
 import DataStorage from '../../DataStorage';
-import './Pool.worker';
+
+// Avoid TSC precompiling, at the same time, webpack can collect dependencies
+if (process.env.NODE_ENV === 'production') {
+    require('./Pool.worker');
+}
 
 export enum WorkerMethods {
     // LUBAN worker methods BEGIN
@@ -10,37 +14,48 @@ export enum WorkerMethods {
     generateViewPath = 'generateViewPath',
     heartBeat = 'heartBeat',
     loadSize = 'loadSize',
-    processImage = 'processImage'
+    processImage = 'processImage',
+    imageRemap = 'imageRemap',
+    svgClipping = 'svgClipping'
     // LUBAN worker methods END
 }
 
-type IWorkerManager = {
+export type IWorkerManager = {
     [method in WorkerMethods]: (data: unknown[], onmessage: (data: unknown) => void) => {
         terminate(): void;
     };
 }
 
 class WorkerManager {
-    public pool: WorkerPool
+    private pool: WorkerPool;
+
+    public getPool() {
+        if (!this.pool) {
+            const config: workerpool.WorkerPoolOptions = {
+                workerType: 'process',
+                forkOpts: {
+                    env: {
+                        Tmpdir: DataStorage.tmpDir,
+                        fontDir: DataStorage.fontDir,
+                    }
+                }
+            };
+            // if (process.env.NODE_ENV === 'development') {
+            //     config.maxWorkers = 2;
+            //     config.forkOpts.execArgv = ['--inspect=8888'];
+            // } else {
+            config.minWorkers = 1;
+            // }
+            this.pool = workerpool.pool('./Pool.worker.js', config);
+        }
+        return this.pool;
+    }
 }
 
 Object.entries(WorkerMethods).forEach(([, method]) => {
     // eslint-disable-next-line func-names
-    WorkerManager.prototype[method] = function (data: any, onmessage?: (payload: unknown) => void) {
-        const pool = (
-            this.pool || (
-                // https://github.com/josdejong/workerpool/blob/cba4d37ec3fcb9a7c49c4675e6607a77fe126876/test/Pool.test.js#L107
-                this.pool = workerpool.pool('./Pool.worker.js', {
-                    minWorkers: 'max',
-                    workerType: 'process',
-                    forkOpts: {
-                        env: {
-                            Tmpdir: DataStorage.tmpDir,
-                        }
-                    }
-                }))
-        ) as WorkerPool;
-
+    WorkerManager.prototype[method] = function (data: unknown[], onmessage?: (payload: unknown) => void) {
+        const pool = this.getPool() as WorkerPool;
         const handle = pool.exec(method, data, {
             on: (payload) => {
                 if (onmessage) {
@@ -48,7 +63,7 @@ Object.entries(WorkerMethods).forEach(([, method]) => {
                 } else {
                     WorkerManager.prototype[method].onmessage(payload);
                 }
-            },
+            }
         });
         return {
             terminate: () => {
@@ -58,6 +73,6 @@ Object.entries(WorkerMethods).forEach(([, method]) => {
     };
 });
 
-const manager = new WorkerManager() as unknown as IWorkerManager;
+const workerManager = new WorkerManager() as unknown as IWorkerManager;
 
-export default manager;
+export default workerManager;

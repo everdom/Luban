@@ -1,9 +1,9 @@
+import classNames from 'classnames';
+import { noop } from 'lodash';
+import includes from 'lodash/includes';
 import PropTypes from 'prop-types';
 import React, { PureComponent } from 'react';
 import * as Icons from 'snapmaker-react-icon';
-import classNames from 'classnames';
-import includes from 'lodash/includes';
-import { noop } from 'lodash';
 import styles from './styles.styl';
 
 class SvgIcon extends PureComponent {
@@ -19,10 +19,12 @@ class SvgIcon extends PureComponent {
         color: PropTypes.string,
         spanText: PropTypes.string,
         spanClassName: PropTypes.string,
-        size: PropTypes.number || PropTypes.string,
+        size: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
         inputInfo: PropTypes.object,
         hoversize: PropTypes.number, // hover background size
         borderRadius: PropTypes.number,
+        onMouseEnter: PropTypes.func,
+        onMouseLeave: PropTypes.func,
         /** type value:
          * 1. hoverNormal: isHovered background: #EEEFF0, color: the same as this.props.color;
          * 2. hoverNoBackground: isHovered background: transparent, color: #2A2C2E;
@@ -36,12 +38,12 @@ class SvgIcon extends PureComponent {
     static defaultProps = {
         isHorizontal: true,
         type: ['pressNormal', 'hoverNormal']
-    }
+    };
 
     state = {
         isHovered: false,
         isPressed: false
-    }
+    };
 
     actions = {
         handleMouseOver: () => {
@@ -82,6 +84,8 @@ class SvgIcon extends PureComponent {
             type,
             children,
             borderRadius = 4,
+            onMouseEnter,
+            onMouseLeave,
             ...props
         } = this.props;
         let {
@@ -90,11 +94,10 @@ class SvgIcon extends PureComponent {
         } = this.props;
         let iconBackground = 'transparent';
         let iconLineHeight = `${hoversize}px`;
-        const Component = Icons[name];
-        // if (!Component) {
-        //     console.log(`Can't find the icon named '${name}', please check your icon name`);
-        //     return null;
-        // }
+        let Component = Icons[name];
+        if (!Component) {
+            Component = Icons.PrintingSettingNormal;
+        }
         const hoverBackgroundColor = includes(type, 'hoverNoBackground') ? 'transparent' : '#EEEFF0';
         const hoverIconColor = includes(type, 'hoverNoBackground') ? '#2A2C2E' : color;
         // const pressedBackground = includes(type, 'pressSpecial') ? '#E7F3FF' : '#D5D6D9';// '#D5D6D9'
@@ -139,7 +142,7 @@ class SvgIcon extends PureComponent {
             >
                 {/* , borderRadius: 4, height: hoverSize, width: hoverSize, textAlign: 'center', lineHeight: iconLineHeight */}
                 {/* width: hoverSize, height: hoverSize, textAlign: 'center'  */}
-                { inputInfo !== undefined && (
+                {inputInfo !== undefined && (
                     <input
                         ref={inputInfo.fileInput}
                         type="file"
@@ -162,8 +165,8 @@ class SvgIcon extends PureComponent {
                     }}
                     onFocus={() => 0}
                     onBlur={() => 0}
-                    onMouseEnter={this.actions.handleMouseOver}
-                    onMouseLeave={this.actions.handleMouseOut}
+                    onMouseEnter={this.props.onMouseEnter || this.actions.handleMouseOver}
+                    onMouseLeave={this.props.onMouseLeave || this.actions.handleMouseOut}
                     onMouseDown={this.actions.handleMouseDown}
                     onMouseUp={this.actions.handleMouseUp}
                 >
@@ -178,7 +181,7 @@ class SvgIcon extends PureComponent {
                         </div>
                     )}
                     {children}
-                    { spanText && isHorizontal && (
+                    {spanText && isHorizontal && (
                         <span
                             className={spanClassName}
                             style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '14px', color: disabled ? '#D5D6D9' : '#545659' }}
@@ -186,7 +189,7 @@ class SvgIcon extends PureComponent {
                             {spanText}
                         </span>
                     )}
-                    { spanText && !isHorizontal && (
+                    {spanText && !isHorizontal && (
                         <div
                             className={spanClassName}
                             style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '14px', color: disabled ? '#D5D6D9' : '#545659' }}

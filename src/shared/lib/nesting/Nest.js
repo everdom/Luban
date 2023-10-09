@@ -3,8 +3,8 @@ import { PolygonUtils, PolygonsUtils } from '../math/PolygonsUtils';
 import AngleRange from './AngleRange';
 import { Line, TYPE_SEGMENT } from '../math/Line';
 import { isEqual } from '../utils';
-import { polyDiff, polyIntersection, polyOffset, simplifyPolygons } from '../../../server/lib/clipper/cLipper-adapter';
-import * as ClipperLib from '../../../server/lib/clipper/clipper';
+import { polyDiff, polyIntersection, polyOffset, simplifyPolygons } from '../clipper/cLipper-adapter';
+import * as ClipperLib from '../clipper/clipper';
 
 const roundAndMulPoint = (point, n = 1) => {
     point.x = Math.round(point.x * n);
@@ -43,8 +43,11 @@ export class Part {
     modelID;
 
     constructor(polygons, center, modelID) {
-        this.polygons = polygons.slice(0, 2);
-        PolygonsUtils.sort(this.polygons, false);
+        this.polygons = polygons;
+        PolygonUtils.sort(this.polygons[0], false);
+        for (let i = 1; i < this.polygons.length; i++) {
+            PolygonUtils.sort(this.polygons[i], true);
+        }
         this.area = Vector2.area(this.polygons[0]);
         this.absArea = Math.abs(this.area);
         this.center = center;
@@ -148,7 +151,6 @@ export class Nest {
         this.parts.sort((part1, part2) => {
             return part2.absArea - part1.absArea;
         });
-
         let minPartArea = this.parts[0].absArea;
         for (let i = 1; i < this.parts.length; i++) {
             minPartArea = Math.min(minPartArea, this.parts[0].absArea);
@@ -1099,8 +1101,8 @@ export class Nest {
 
         this.updateCurrentPlate(plate, diffPlatePolygons);
 
-        if (res.rotatePolygons.length > 1) {
-            this.plates.push(new Plate(res.rotatePolygons[1]));
+        for (let i = 1; i < res.rotatePolygons.length; i++) {
+            this.plates.push(new Plate(res.rotatePolygons[i]));
         }
 
         return res;

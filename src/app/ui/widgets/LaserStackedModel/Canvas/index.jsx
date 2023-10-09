@@ -52,12 +52,16 @@ const Controls = forwardRef((props, ref) => {
         camera.far = 10000;
         gl.toneMapping = NoToneMapping;
         gl.outputEncoding = LinearEncoding;
-        setSize(containerWidth, containerHeight);
+        // setSize(containerWidth, containerHeight);
     }, [setSize]);
+
     return (
         <>
+            {/* eslint-disable */}
             <orbitControls args={[camera, gl.domElement]} ref={controls} />
+            {/* eslint-disable */}
             <hemisphereLight args={[0xdddddd, 0x666666, 1]} position={[0, -1000, 0]} />
+            {/* eslint-disable */}
             <directionalLight args={[0x666666, 0.4]} position={directionalLightPosition} />
         </>
     );
@@ -76,9 +80,9 @@ const ModelViewer = React.memo(({ geometry }) => {
         toTopFrontRight();
     }, [geometry]);
     return (
-        <div>
+        <div style={{ width: '696px', height: '509px' }}>
             {geometry && (
-                <Canvas frameloop="demand" onCreated={() => toTopFrontRight()} flat linear>
+                <Canvas frameloop="demand" onCreated={() => toTopFrontRight()} flat="true" linear="true">
                     <Controls ref={controlsRef} />
                     <group rotation={[-Math.PI / 2, 0, 0]}>
                         <mesh position={[0, 0, 0]}>

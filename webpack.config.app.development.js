@@ -3,62 +3,81 @@
 const without = require('lodash/without');
 const path = require('path');
 const webpack = require('webpack');
-const WriteFileWebpackPlugin = require('write-file-webpack-plugin');
-// const ExtractTextPlugin = require('extract-text-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
-// const CSSSplitWebpackPlugin = require('css-split-webpack-plugin').default;
 const ManifestPlugin = require('webpack-manifest-plugin');
-// const InlineChunkWebpackPlugin = require('html-webpack-inline-chunk-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
-// const HtmlWebpackPluginAddons = require('html-webpack-plugin-addons');
 const nib = require('nib');
 const stylusLoader = require('stylus-loader');
-
 const babelConfig = require('./babel.config');
+
 const languages = require('./webpack.config.app-i18n').languages;
+const pkg = require('./package.json');
 
+const { CLIENT_PORT, SERVER_PORT } = pkg.config;
 
-const timestamp = new Date().getTime();
+const devServer = {
+    hot: true,
+    port: CLIENT_PORT,
+    static: {
+        directory: path.resolve(__dirname, 'output/src/app'),
+    },
+    proxy: {
+        '/api': `http://localhost:${SERVER_PORT}`,
+        '/data': `http://localhost:${SERVER_PORT}`,
+        '/worker': `http://localhost:${SERVER_PORT}`,
+        '/resources': `http://localhost:${SERVER_PORT}`,
+        '/socket.io': {
+            target: `ws://localhost:${SERVER_PORT}`,
+            ws: true
+        },
+    },
+    devMiddleware: {
+        index: true,
+        writeToDisk: true,
+    }
+};
 
-export default {
+module.exports = {
     mode: 'development',
     target: 'web',
-    devtool: 'source-map',
-    cache: true,
+    // devtool: 'eval',
+    devtool: 'eval-cheap-source-map',
     context: path.resolve(__dirname, 'src/app'),
     resolve: {
         modules: [
+            path.resolve(__dirname, 'packages/*'),
             path.resolve(__dirname, 'src/shared'),
             path.resolve(__dirname, 'src/app'),
-            'node_modules'
+            'node_modules',
         ],
-        extensions: ['.js', '.json', '.jsx', '.styl', '.ts']
+        extensions: ['.js', '.json', '.jsx', '.styl', '.ts', '.tsx'],
     },
     entry: {
-        polyfill: [
-            // https://github.com/Yaffle/EventSource
-            'eventsource-polyfill',
-            // https://github.com/glenjamin/webpack-hot-middleware
-            'webpack-hot-middleware/client?reload=true',
-            path.resolve(__dirname, 'src/app/polyfill/index.js')
-        ],
-        app: [
-            // https://github.com/Yaffle/EventSource
-            'eventsource-polyfill',
-            // https://github.com/glenjamin/webpack-hot-middleware
-            'webpack-hot-middleware/client?reload=true',
-            path.resolve(__dirname, 'src/app/index.jsx')
-        ]
+        app: path.resolve(__dirname, 'src/app/index.jsx'),
+        polyfill: path.resolve(__dirname, 'src/app/polyfill/index.js'),
+        // 'Pool.worker': path.resolve(__dirname, 'src/app/lib/manager/Pool.worker.js')
     },
     output: {
-        path: path.resolve(__dirname, 'output/app'),
-        chunkFilename: `[name].[hash].bundle.js?_=${timestamp}`,
-        filename: `[name].[hash].bundle.js?_=${timestamp}`,
+        path: path.resolve(__dirname, 'output/src/app'),
+        filename: '[name].[hash].bundle.js',
         publicPath: '',
-        globalObject: 'this'
+        globalObject: 'this',
+        libraryTarget: 'umd',
+    },
+    optimization: {
+        minimize: false,
+        splitChunks: {
+            chunks: 'all',
+            name: true,
+            cacheGroups: {
+                vendors: {
+                    test: /[\\/]node_modules[\\/]/,
+                    priority: -10
+                }
+            },
+        }
     },
     plugins: [
-        new webpack.HotModuleReplacementPlugin(),
         new webpack.LoaderOptionsPlugin({
             debug: true
         }),
@@ -71,9 +90,6 @@ export default {
                 import: ['~nib/lib/nib/index.styl']
             }
         }),
-        // https://github.com/gajus/write-file-webpack-plugin
-        // Forces webpack-dev-server to write bundle files to the file system.
-        new WriteFileWebpackPlugin(),
         new webpack.ContextReplacementPlugin(
             /moment[/\\]locale$/,
             new RegExp(`^\\./(${without(languages, 'en').join('|')})$`)
@@ -87,71 +103,116 @@ export default {
         new HtmlWebpackPlugin({
             filename: 'index.html',
             template: path.resolve(__dirname, 'src/app/resources/assets/index.html'),
-            chunksSortMode: 'dependency' // Sort chunks by dependency
         })
     ],
     module: {
         rules: [
+            // ESLint
             {
-                test: /\.worker\.(j|t)s$/,
+                enforce: 'pre',
+                test: /(\.jsx?|\.tsx?)$/,
+                loader: 'eslint-loader',
+                exclude: /node_modules/,
+                options: {
+                    cache: false,
+                    fix: false,
+                    emitWarning: false,
+                    quiet: true,
+                    configFile: path.resolve(__dirname, '.eslintrc.js'),
+                },
+            },
+            // workers
+            {
+                test: /\.worker\.(js|ts)$/,
+                include: [
+                    path.resolve(__dirname, 'src/app/lib/manager/'),
+                ],
+                exclude: /node_modules/,
                 loader: 'worker-loader',
                 options: {
+                    publicPath: '/worker/',
                     filename: '[name].js',
                 },
             },
+            // TypeScript/TSX
             {
-                test: /\.ts$/,
-                loader: 'ts-loader'
-            },
-            {
-                test: /\.jsx?$|\.ts$/,
-                loader: 'eslint-loader',
-                enforce: 'pre',
-                exclude: /node_modules/,
+                test: /\.tsx?$/,
+                loader: 'ts-loader',
+                // exclude: /node_modules/,
                 options: {
-                    cache: true
-                }
+                    transpileOnly: true,
+                },
             },
+            // JavaScript/JSX
             {
-                test: /\.js(x)?$/,
-                loader: 'babel-loader',
-                exclude: /node_modules/,
-                options: babelConfig
-            },
-            {
-                test: /\.styl$/,
-                use: [
-                    'style-loader',
-                    {
-                        loader: 'css-loader',
-                        options: {
-                            camelCase: true, // export class names in camelCase
-                            modules: true, // enable CSS module
-                            importLoaders: 1, // loaders applied before css loader
-                            localIdentName: '[path][name]__[local]--[hash:base64:5]' // generated identifier
-                        }
-                    },
-                    'stylus-loader'
-                ],
-                exclude: [
-                    path.resolve(__dirname, 'src/app/styles')
-                ]
-            },
-            {
-                test: /\.styl$/,
-                use: [
-                    'style-loader',
-                    'css-loader?camelCase',
-                    'stylus-loader'
-                ],
+                test: /\.jsx?$/,
                 include: [
-                    path.resolve(__dirname, 'src/app/styles')
+                    path.resolve(__dirname, 'packages/*'),
+                    path.resolve(__dirname, 'src/app'),
+                    path.resolve(__dirname, 'src/shared'),
+                ],
+                exclude: /node_modules/,
+                loader: 'babel-loader',
+                options: {
+                    ...babelConfig,
+                    cacheDirectory: true
+                },
+            },
+            // Stylus
+            {
+                test: /\.styl$/,
+                oneOf: [
+                    // global styles
+                    {
+                        include: [
+                            path.resolve(__dirname, 'src/app/styles')
+                        ],
+                        use: [
+                            'style-loader',
+                            {
+                                loader: 'css-loader',
+                                options: {
+                                    importLoaders: 1,
+                                    modules: {
+                                        mode: 'global',
+                                        exportLocalsConvention: 'camelCase',
+                                    },
+                                    esModule: false,
+                                }
+                            },
+                            'stylus-loader',
+                        ],
+                    },
+                    // module
+                    {
+                        exclude: [
+                            path.resolve(__dirname, 'src/app/styles')
+                        ],
+                        use: [
+                            'style-loader',
+                            {
+                                loader: 'css-loader',
+                                options: {
+                                    importLoaders: 1, // loaders applied before css loader
+                                    modules: {
+                                        mode: 'local',
+                                        exportLocalsConvention: 'camelCase',
+                                        localIdentName: '[path][name]__[local]--[hash:base64:5]',
+                                    },
+                                    esModule: false,
+                                }
+                            },
+                            'stylus-loader',
+                        ]
+                    },
                 ]
             },
+            // CSS files
             {
                 test: /\.css$/,
                 use: ['style-loader', 'css-loader']
             },
+            // image files
             {
                 test: /\.(png|jpg|svg)$/,
                 loader: 'url-loader',
@@ -159,18 +220,11 @@ export default {
                     limit: 8192
                 }
             },
+            // font files
             {
-                test: /\.woff(2)?(\?v=[0-9]\.[0-9]\.[0-9])?$/,
-                loader: 'url-loader',
-                options: {
-                    limit: 10000,
-                    mimetype: 'application/font-woff'
-                }
-            },
-            {
-                test: /\.(ttf|eot)(\?v=[0-9]\.[0-9]\.[0-9])?$/,
+                test: /\.(ttf|woff|woff2|eot)(\?v=[0-9]\.[0-9]\.[0-9])?$/,
                 loader: 'file-loader'
-            }
+            },
         ]
     },
     // Some libraries import Node modules but don't use them in the browser.
@@ -178,6 +232,7 @@ export default {
     node: {
         fs: 'empty',
         net: 'empty',
-        tls: 'empty'
-    }
+        tls: 'empty',
+    },
+    devServer: devServer,
 };

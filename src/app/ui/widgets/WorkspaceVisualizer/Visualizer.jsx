@@ -1,55 +1,44 @@
+import { WorkflowStatus } from '@snapmaker/luban-platform';
+import TWEEN from '@tweenjs/tween.js';
+import colornames from 'colornames';
 import isEqual from 'lodash/isEqual';
-import React, { PureComponent } from 'react';
 import PropTypes from 'prop-types';
+import pubsub from 'pubsub-js';
+import React from 'react';
 import { connect } from 'react-redux';
 import * as THREE from 'three';
-import TWEEN from '@tweenjs/tween.js';
-import pubsub from 'pubsub-js';
-import colornames from 'colornames';
+import { humanReadableTime } from '../../../lib/time-utils';
 
-// import { Button } from '@trendmicro/react-buttons';
-import Canvas from '../../components/SMCanvas';
-import styles from './index.styl';
-import { controller } from '../../../lib/controller';
 import {
     CONNECTION_TYPE_SERIAL,
-    MARLIN,
-    PROTOCOL_TEXT,
-    WORKFLOW_STATUS_IDLE,
-    WORKFLOW_STATUS_PAUSED,
-    WORKFLOW_STATUS_RUNNING,
-    WORKFLOW_STATE_IDLE,
-    WORKFLOW_STATE_PAUSED,
-    WORKFLOW_STATE_RUNNING,
-    WORKFLOW_STATUS_UNKNOWN,
+    HEAD_CNC,
+    HEAD_LASER,
+    HEAD_PRINTING,
     IMAGE_WIFI_ERROR,
     IMAGE_WIFI_WARNING,
-    CONNECTION_TYPE_WIFI,
-    HEAD_CNC,
-    HEAD_PRINTING,
-    HEAD_LASER
+    MARLIN,
+    PROTOCOL_TEXT,
 } from '../../../constants';
-import TargetPoint from '../../../three-extensions/TargetPoint';
-import { actions as machineActions } from '../../../flux/machine';
-import { actions as workspaceActions, WORKSPACE_STAGE } from '../../../flux/workspace';
-import PrintablePlate from './PrintablePlate';
-
+import { WORKSPACE_STAGE, actions as workspaceActions } from '../../../flux/workspace';
+import { controller } from '../../../communication/socket-communication';
+import i18n from '../../../lib/i18n';
+import log from '../../../lib/log';
+import TargetPoint from '../../../scene/three-extensions/TargetPoint';
+import modalSmallHOC from '../../components/Modal/modal-small';
+import ModalSmall from '../../components/Modal/ModalSmall';
+import ProgressBar from '../../components/ProgressBar';
+import Canvas from '../../components/SMCanvas';
+import SecondaryToolbar from '../CanvasToolbar/SecondaryToolbar';
 import { loadTexture } from './helpers';
+import styles from './index.styl';
 import Loading from './Loading';
+import PrintablePlate from './PrintablePlate';
 import Rendering from './Rendering';
 import ToolHead from './ToolHead';
-// import WorkflowControl from './WorkflowControl';
-import SecondaryToolbar from '../CanvasToolbar/SecondaryToolbar';
-import ModalSmall from '../../components/Modal/ModalSmall';
-
-import i18n from '../../../lib/i18n';
-import modalSmallHOC from '../../components/Modal/modal-small';
-import ProgressBar from '../../components/ProgressBar';
-
-// import modal from '../../lib/modal';
+import { SnapmakerArtisanMachine, SnapmakerOriginalMachine } from '../../../machines';
 
 
-class Visualizer extends PureComponent {
+class Visualizer extends React.PureComponent {
     static propTypes = {
         // redux
         isEnclosureDoorOpen: PropTypes.bool,
@@ -60,7 +49,7 @@ class Visualizer extends PureComponent {
 
         uploadState: PropTypes.string.isRequired,
         boundingBox: PropTypes.object,
-        server: PropTypes.object.isRequired,
+        server: PropTypes.object,
         connectionType: PropTypes.string.isRequired,
         workflowStatus: PropTypes.string,
         renderState: PropTypes.string.isRequired,
@@ -72,18 +61,18 @@ class Visualizer extends PureComponent {
         setGcodePrintingIndex: PropTypes.func.isRequired,
 
         executeGcode: PropTypes.func.isRequired,
+        executeCmd: PropTypes.func.isRequired,
         updatePause3dpStatus: PropTypes.func.isRequired,
         pause3dpStatus: PropTypes.object,
 
         isRotate: PropTypes.bool,
         toolHead: PropTypes.string,
         gcodeFile: PropTypes.object,
-        series: PropTypes.string,
         headType: PropTypes.string,
-        size: PropTypes.object.isRequired,
 
         isLaserPrintAutoMode: PropTypes.bool.isRequired,
         materialThickness: PropTypes.number.isRequired,
+        materialThicknessSource: PropTypes.string.isRequired,
         laserFocalLength: PropTypes.number,
         background: PropTypes.object.isRequired,
         workPosition: PropTypes.object.isRequired,
@@ -96,11 +85,18 @@ class Visualizer extends PureComponent {
         modelGroup: PropTypes.object,
         onRef: PropTypes.func,
         preview: PropTypes.bool,
+
+        activeMachine: PropTypes.shape({
+            metadata: PropTypes.object,
+            identifier: PropTypes.string
+        })
     };
 
     previewPrintableArea = null;
 
     visualizerGroup = { object: new THREE.Group() };
+
+    isMounted = React.createRef();
 
     canvas = React.createRef();
 
@@ -115,6 +111,7 @@ class Visualizer extends PureComponent {
     pubsubTokens = [];
 
     pauseStatus = {
+        pos: {},
         headStatus: false,
         headPower: 0
     };
@@ -158,11 +155,7 @@ class Visualizer extends PureComponent {
             this.updateWorkPositionToZero();
             this.props.setGcodePrintingIndex(0);
         },
-        'connection:close': (options) => {
-            const { dataSource } = options;
-            if (dataSource !== PROTOCOL_TEXT) {
-                return;
-            }
+        'connection:close': () => {
             // reset state related to port and controller
             this.stopToolheadRotationAnimation();
             this.updateWorkPositionToZero();
@@ -206,15 +199,15 @@ class Visualizer extends PureComponent {
             if (this.state.workflowState !== workflowState) {
                 this.setState({ workflowState });
                 switch (workflowState) {
-                    case WORKFLOW_STATE_IDLE:
+                    case WorkflowStatus.Idle:
                         this.stopToolheadRotationAnimation();
                         this.updateWorkPositionToZero();
                         this.props.setGcodePrintingIndex(0);
                         break;
-                    case WORKFLOW_STATE_RUNNING:
+                    case WorkflowStatus.Running:
                         this.startToolheadRotationAnimation();
                         break;
-                    case WORKFLOW_STATE_PAUSED:
+                    case WorkflowStatus.Paused:
                         this.stopToolheadRotationAnimation();
                         break;
                     default:
@@ -236,7 +229,7 @@ class Visualizer extends PureComponent {
                     state
                 }
             });
-            if (this.state.workflowState === WORKFLOW_STATE_RUNNING) {
+            if (this.state.workflowState === WorkflowStatus.Running) {
                 this.updateWorkPosition(pos);
             }
         },
@@ -266,39 +259,41 @@ class Visualizer extends PureComponent {
             return (this.props.headType === HEAD_LASER);
         },
         handleRun: () => {
-            const { server,
-                workflowStatus, connectionType,
+            const {
+                server,
+                workflowStatus,
                 headType, isLaserPrintAutoMode,
                 materialThickness,
+                materialThicknessSource,
                 isRotate,
                 toolHead,
                 gcodeFile,
-                series,
                 laserFocalLength,
                 background,
-                size,
                 workPosition,
-                originOffset } = this.props;
-            const { workflowState } = this.state;
-            if ((connectionType === CONNECTION_TYPE_WIFI && workflowStatus === WORKFLOW_STATUS_IDLE)
-                || (connectionType === CONNECTION_TYPE_SERIAL && workflowState === WORKFLOW_STATE_IDLE)) {
+                originOffset,
+                activeMachine
+            } = this.props;
+
+            if (workflowStatus === WorkflowStatus.Idle) {
+                log.info('Start to run G-code...');
                 server.startServerGcode({
                     headType,
                     workflowStatus,
                     isLaserPrintAutoMode,
                     materialThickness,
+                    materialThicknessSource,
                     isRotate,
                     toolHead,
                     // for wifi indiviual
                     uploadName: gcodeFile.uploadName,
-                    series,
                     laserFocalLength,
                     background,
-                    size,
+                    series: activeMachine.identifier,
+                    size: activeMachine.metadata.size,
                     workPosition,
                     originOffset,
-                    // for serialport indiviual
-                    workflowState,
+                    renderName: gcodeFile?.renderGcodeFileName || gcodeFile.uploadName
                 }, (res) => {
                     if (res) {
                         const { msg, code } = res;
@@ -328,15 +323,16 @@ class Visualizer extends PureComponent {
                 });
             }
 
-            if ((connectionType === CONNECTION_TYPE_WIFI && workflowStatus === WORKFLOW_STATUS_PAUSED)
-                || (connectionType === CONNECTION_TYPE_SERIAL && workflowState === WORKFLOW_STATE_PAUSED)) {
+            if (workflowStatus === WorkflowStatus.Paused) {
                 server.resumeServerGcode({
                     headType: this.props.headType,
                     pause3dpStatus: this.props.pause3dpStatus,
-                    pauseStatus: this.pauseStatus
+                    pauseStatus: this.pauseStatus,
+                    gcodeFile,
+                    sizeZ: this.props.activeMachine.metadata.size.z
                 }, ({ msg, code }) => {
                     if (msg) {
-                        if (code === 202) {
+                        if (code === 202 || code === 222) {
                             modalSmallHOC({
                                 title: i18n._('key-Workspace/Page-Filament Runout Recovery'),
                                 text: i18n._('key-Workspace/Page-Filament has run out. Please load new filament to continue printing.'),
@@ -364,9 +360,17 @@ class Visualizer extends PureComponent {
             // delay 500ms to let buffer executed. and status propagated
             setTimeout(() => {
                 if (this.state.gcode.received + 1 >= this.state.gcode.sent) {
+                    const workPosition = this.state.workPosition;
+
                     this.pauseStatus = {
                         headStatus: this.state.controller.state.headStatus,
-                        headPower: this.state.controller.state.headPower
+                        headPower: this.state.controller.state.headPower,
+                        pos: {
+                            x: Number(workPosition.x),
+                            y: Number(workPosition.y),
+                            z: Number(workPosition.z),
+                            e: Number(workPosition.e)
+                        }
                     };
                     if (this.pauseStatus.headStatus) {
                         this.props.executeGcode('M5');
@@ -376,7 +380,6 @@ class Visualizer extends PureComponent {
                     if (this.props.pause3dpStatus?.pausing) {
                         const pause3dpStatus = {};
                         pause3dpStatus.pausing = false;
-                        const workPosition = this.state.workPosition;
                         pause3dpStatus.pos = {
                             x: Number(workPosition.x),
                             y: Number(workPosition.y),
@@ -386,12 +389,13 @@ class Visualizer extends PureComponent {
                         const pos = pause3dpStatus.pos;
                         // experience params for retraction: F3000, E->(E-5)
                         const targetE = Math.max(pos.e - 5, 0);
-                        const targetZ = Math.min(pos.z + 30, this.props.size.z);
+                        const targetZ = Math.min(pos.z + 30, this.props.activeMachine.metadata.size.z);
                         const gcode = [
-                            `G1 F3000 E${targetE}\n`,
-                            `G1 Z${targetZ} F3000\n`,
-                            `G1 F100 E${pos.e}\n`
+                            `G1 E${targetE}\n`,
+                            `G1 Z${targetZ}\n`,
+                            `G1 E${pos.e}\n`
                         ];
+                        // const gcode = `G1 E${targetE}\nG1 Z${targetZ}\nG1 E${pos.e}\n`;
                         this.props.executeGcode(gcode);
                         this.props.updatePause3dpStatus(pause3dpStatus);
                     }
@@ -402,16 +406,16 @@ class Visualizer extends PureComponent {
         },
         handlePause: () => {
             const { workflowStatus, connectionType, server } = this.props;
-            const { workflowState } = this.state;
+            // const { workflowState } = this.state;
             if (this.actions.is3DP()) {
                 this.props.updatePause3dpStatus({
                     pausing: true,
                     pos: null
                 });
             }
-            if (connectionType === CONNECTION_TYPE_WIFI && workflowStatus === WORKFLOW_STATUS_RUNNING
-                || connectionType === CONNECTION_TYPE_SERIAL && workflowState === WORKFLOW_STATE_RUNNING) {
+            if (workflowStatus === WorkflowStatus.Running) {
                 server.pauseServerGcode(() => {
+                    // Refactor: serial + text?, unify api
                     if (connectionType === CONNECTION_TYPE_SERIAL) {
                         this.actions.tryPause();
                     }
@@ -419,7 +423,7 @@ class Visualizer extends PureComponent {
             }
         },
         handleStop: () => {
-            const { workflowState } = this.state;
+            // const { workflowState } = this.state;
             const { workflowStatus, server, connectionType } = this.props;
             if (this.actions.is3DP()) {
                 this.props.updatePause3dpStatus({
@@ -427,21 +431,21 @@ class Visualizer extends PureComponent {
                     pos: null
                 });
             }
-            if (connectionType === CONNECTION_TYPE_WIFI && workflowStatus !== WORKFLOW_STATUS_IDLE
-                || connectionType === CONNECTION_TYPE_SERIAL && workflowState !== WORKFLOW_STATE_IDLE) {
-                server.stopServerGcode(() => {
-                    if (connectionType === CONNECTION_TYPE_SERIAL) {
-                        this.actions.tryPause();
-                    }
-                });
+            if (connectionType === CONNECTION_TYPE_SERIAL) {
+                this.actions.tryPause();
+            }
+            if (workflowStatus !== WorkflowStatus.Idle) {
+                setTimeout(() => {
+                    server.stopServerGcode();
+                }, 60);
             }
         },
         handleClose: () => {
             // dismiss gcode file name
             this.props.clearGcode();
             const { workflowState } = this.state;
-            if ([WORKFLOW_STATE_IDLE].includes(workflowState)) {
-                this.props.executeGcode(null, null, 'gcode:unload');
+            if ([WorkflowStatus.Idle].includes(workflowState)) {
+                this.props.executeCmd('gcode:unload');
             }
         },
         // canvas
@@ -484,25 +488,33 @@ class Visualizer extends PureComponent {
         }
     };
 
-    componentDidMount() {
+    async componentDidMount() {
+        this.isMounted.current = true;
+
+        this.visualizerGroup.object.add(this.props.modelGroup);
+
         this.props.onRef && this.props.onRef(this);
-        this.setupToolhead().then(() => {
-            const size = this.props.size;
-            this.subscribe();
-            this.addControllerEvents();
-            this.setupTargetPoint();
-            this.visualizerGroup.object.add(this.props.modelGroup);
-            this.previewPrintableArea = new PrintablePlate({
-                x: size.x * 2,
-                y: size.y * 2
-            });
+        await this.setupToolhead();
+
+        this.subscribe();
+        this.addControllerEvents();
+        this.setupTargetPoint();
+
+        const activeMachine = this.props.activeMachine;
+        this.previewPrintableArea = new PrintablePlate({
+            x: activeMachine.metadata.size.x * 2,
+            y: activeMachine.metadata.size.y * 2
+        });
+
+        // In Async function, the componenet could be unmounted already
+        if (this.isMounted.current) {
             this.setState({
                 printableArea: new PrintablePlate({
-                    x: size.x * 2,
-                    y: size.y * 2
+                    x: activeMachine.metadata.size.x * 2,
+                    y: activeMachine.metadata.size.y * 2
                 })
             });
-        });
+        }
     }
 
     /**
@@ -513,40 +525,40 @@ class Visualizer extends PureComponent {
      *  - Upload G-code to controller
      */
     componentWillReceiveProps(nextProps) {
-        if (!isEqual(nextProps.size, this.props.size) || !isEqual(nextProps.preview, this.props.preview)) {
-            const size = nextProps.size;
+        if (!isEqual(nextProps.activeMachine, this.props.activeMachine) || !isEqual(nextProps.preview, this.props.preview)) {
+            const activeMachine = nextProps.activeMachine;
             if (nextProps.preview) {
-                this.previewPrintableArea && this.previewPrintableArea.updateSize({
-                    x: size.x * 2,
-                    y: size.y * 2
+                this.previewPrintableArea && this.previewPrintableArea.updateSize(this.props.activeMachine.identifier, {
+                    x: activeMachine.metadata.size.x * 2,
+                    y: activeMachine.metadata.size.y * 2
                 });
             } else {
-                this.state.printableArea && this.state.printableArea.updateSize({
-                    x: size.x * 2,
-                    y: size.y * 2
+                this.state.printableArea && this.state.printableArea.updateSize(this.props.activeMachine.identifier, {
+                    x: activeMachine.metadata.size.x * 2,
+                    y: activeMachine.metadata.size.y * 2
                 });
             }
-            this.canvas.current && this.canvas.current.setCamera(new THREE.Vector3(0, 0, Math.min(size.z * 2, 300)), new THREE.Vector3());
+            this.canvas.current && this.canvas.current.setCamera(new THREE.Vector3(0, 0, Math.min(activeMachine.metadata.size.z * 2, 300)), new THREE.Vector3());
         }
 
-        if (this.props.workflowStatus !== WORKFLOW_STATUS_IDLE && nextProps.workflowStatus === WORKFLOW_STATUS_IDLE) {
+        if (this.props.workflowStatus !== WorkflowStatus.Idle && nextProps.workflowStatus === WorkflowStatus.Idle) {
             this.stopToolheadRotationAnimation();
             this.updateWorkPositionToZero();
             this.props.setGcodePrintingIndex(0);
         }
-        if (this.props.workflowStatus !== WORKFLOW_STATUS_UNKNOWN && nextProps.workflowStatus === WORKFLOW_STATUS_UNKNOWN) {
+        if (this.props.workflowStatus !== WorkflowStatus.Unknown && nextProps.workflowStatus === WorkflowStatus.Unknown) {
             this.stopToolheadRotationAnimation();
             this.updateWorkPositionToZero();
             this.props.setGcodePrintingIndex(0);
         }
-        if (this.props.workflowStatus !== WORKFLOW_STATUS_RUNNING && nextProps.workflowStatus === WORKFLOW_STATUS_RUNNING) {
+        if (this.props.workflowStatus !== WorkflowStatus.Running && nextProps.workflowStatus === WorkflowStatus.Running) {
             for (let i = 0; i < nextProps.gcodePrintingInfo.sent; i++) {
                 this.props.setGcodePrintingIndex(i);
             }
             this.startToolheadRotationAnimation();
             this.renderScene();
         }
-        if (this.props.workflowStatus !== WORKFLOW_STATUS_PAUSED && nextProps.workflowStatus === WORKFLOW_STATUS_PAUSED) {
+        if (this.props.workflowStatus !== WorkflowStatus.Paused && nextProps.workflowStatus === WorkflowStatus.Paused) {
             this.stopToolheadRotationAnimation();
         }
         if (nextProps.gcodePrintingInfo && nextProps.gcodePrintingInfo.sent > 0 && nextProps.gcodePrintingInfo.sent !== this.props.gcodePrintingInfo.sent) {
@@ -611,8 +623,11 @@ class Visualizer extends PureComponent {
     }
 
     componentWillUnmount() {
+        this.isMounted.current = false;
         this.unsubscribe();
         this.removeControllerEvents();
+
+        this.canvas.current = null;
     }
 
     setupTargetPoint() {
@@ -649,7 +664,9 @@ class Visualizer extends PureComponent {
     subscribe() {
         const tokens = [
             pubsub.subscribe('resize', () => {
-                this.canvas.current.resizeWindow();
+                if (this.canvas.current) {
+                    this.canvas.current.resizeWindow();
+                }
             })
         ];
         this.pubsubTokens = this.pubsubTokens.concat(tokens);
@@ -733,7 +750,6 @@ class Visualizer extends PureComponent {
         this.canvas.current && this.canvas.current.renderScene();
     }
 
-
     render() {
         const state = this.state;
         const notice = this.notice();
@@ -746,23 +762,26 @@ class Visualizer extends PureComponent {
                 {gcodeFile !== null && (
                     <div className={styles['visualizer-info']}>
                         <p>{i18n._(gcodeFile?.renderGcodeFileName)}</p>
+                        <p>{humanReadableTime(gcodeFile?.estimated_time)}</p>
                     </div>
                 )}
                 <div className={styles['canvas-wrapper']}>
-                    {this.props.uploadState === 'uploading' && <Loading />}
-                    {this.props.renderState === 'rendering' && <Rendering />}
+                    {
+                        this.props.uploadState === 'uploading' ? <Loading />
+                            : (this.props.renderState === 'rendering' && <Rendering />)
+                    }
                     {state.printableArea && (
+                        // size={this.props.size}
                         <Canvas
                             ref={this.canvas}
-                            size={this.props.size}
                             modelGroup={this.visualizerGroup}
                             printableArea={this.state.printableArea}
-                            cameraInitialPosition={new THREE.Vector3(0, 0, Math.min(this.props.size.z * 2, 300))}
+                            cameraInitialPosition={new THREE.Vector3(0, 0, Math.min(this.props.activeMachine.metadata.size.z * 2, 300))}
                             cameraInitialTarget={new THREE.Vector3(0, 0, 0)}
                         />
                     )}
                 </div>
-                <div className="position-ab left-16 bottom-16">
+                <div className="position-absolute left-16 bottom-16">
                     <SecondaryToolbar
                         zoomIn={this.actions.zoomIn}
                         zoomOut={this.actions.zoomOut}
@@ -813,45 +832,65 @@ class Visualizer extends PureComponent {
 }
 
 const mapStateToProps = (state) => {
-    const machine = state.machine;
     const workspace = state.workspace;
     const laser = state.laser;
+    const activeMachine = state.machine.activeMachine || SnapmakerOriginalMachine;
+    activeMachine.metadata.size.z = activeMachine.metadata.size.z || SnapmakerArtisanMachine.metadata.size.z;
+
+    // connection
+    const {
+        connectionType
+    } = state.workspace;
+
+    // connected server
+    const {
+        server
+    } = state.workspace;
 
     return {
-        size: workspace.size,
-        server: machine.server,
-        pause3dpStatus: machine.pause3dpStatus,
-        doorSwitchCount: machine.doorSwitchCount,
-        isEmergencyStopped: machine.isEmergencyStopped,
-        isEnclosureDoorOpen: machine.isEnclosureDoorOpen,
-        laser10WErrorState: machine.laser10WErrorState,
+        connectionType,
+
+        pause3dpStatus: workspace.pause3dpStatus,
+        doorSwitchCount: workspace.doorSwitchCount,
+        isEmergencyStopped: workspace.isEmergencyStopped,
+        isEnclosureDoorOpen: workspace.isEnclosureDoorOpen,
+        laser10WErrorState: workspace.laser10WErrorState,
+
         headType: workspace.headType,
         toolHead: workspace.toolHead,
-        workflowStatus: machine.workflowStatus,
-        isConnected: machine.isConnected,
-        connectionType: machine.connectionType,
+        workflowStatus: workspace.workflowStatus,
         uploadState: workspace.uploadState,
         gcodeList: workspace.gcodeList,
         gcodeFile: workspace.gcodeFile,
 
-        gcodePrintingInfo: machine.gcodePrintingInfo,
-        workPosition: machine.workPosition,
-        isLaserPrintAutoMode: machine.isLaserPrintAutoMode,
-        // type
-        materialThickness: machine.materialThickness,
+        gcodePrintingInfo: workspace.gcodePrintingInfo,
+        isLaserPrintAutoMode: workspace.isLaserPrintAutoMode,
+
+        // laser camera capture
+        materialThickness: workspace.materialThickness,
+        materialThicknessSource: workspace.materialThicknessSource,
         background: laser.background,
         isRotate: workspace.isRotate,
+
         // type
-        laserFocalLength: machine.laserFocalLength,
-        originOffset: machine.originOffset,
+        laserFocalLength: workspace.laserFocalLength,
 
         modelGroup: workspace.modelGroup,
-        series: workspace.series,
         renderState: workspace.renderState,
         boundingBox: workspace.boundingBox,
         renderingTimestamp: workspace.renderingTimestamp,
         stage: workspace.stage,
         progress: workspace.progress,
+
+        // connection
+        server,
+        isConnected: workspace.isConnected,
+
+        activeMachine,
+
+        // machine state
+        workPosition: workspace.workPosition,
+        originOffset: workspace.originOffset,
     };
 };
 
@@ -860,8 +899,9 @@ const mapDispatchToProps = (dispatch) => ({
     unloadGcode: () => dispatch(workspaceActions.unloadGcode()),
     setGcodePrintingIndex: (index) => dispatch(workspaceActions.setGcodePrintingIndex(index)),
 
-    executeGcode: (gcode, context, cmd) => dispatch(machineActions.executeGcode(gcode, context, cmd)),
-    updatePause3dpStatus: (pause3dpStatus) => dispatch(machineActions.updatePause3dpStatus(pause3dpStatus))
+    executeGcode: (gcode) => dispatch(workspaceActions.executeGcode(gcode)),
+    executeCmd: (cmd) => dispatch(workspaceActions.executeCmd(cmd)),
+    updatePause3dpStatus: (pause3dpStatus) => dispatch(workspaceActions.updatePause3dpStatus(pause3dpStatus))
 });
 
 export default connect(mapStateToProps, mapDispatchToProps)(Visualizer);

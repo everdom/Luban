@@ -1,51 +1,33 @@
 /* eslint no-unused-vars: 0 */
-import dns from 'dns';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import _ from 'lodash';
 import bcrypt from 'bcrypt-nodejs';
 import chalk from 'chalk';
-import webappengine from 'webappengine';
-import Jimp from 'jimp';
+import dns from 'dns';
+import fs from 'fs';
+import _ from 'lodash';
+import os from 'os';
+import path from 'path';
+import http from 'http';
+// import webappengine from 'webappengine';
 
-import createApplication from './app';
-import monitor from './services/monitor';
-import config from './services/configstore';
-import logger from './lib/logger';
-import settings from './config/settings';
-import { startServices } from './services';
 import DataStorage from './DataStorage';
+import createApplication from './app';
+import settings from './config/settings';
+import logger from './lib/logger';
+import { startServices } from './services';
+import config from './services/configstore';
+import monitor from './services/monitor';
 
 
 const log = logger('init');
 
-const EPS = 1e-6;
-
 const createServer = (options, callback) => {
     options = { ...options };
-    { // verbosity
-        const verbosity = options.verbosity;
-
-        // https://github.com/winstonjs/winston#logging-levels
-        if (verbosity === 1) {
-            _.set(settings, 'verbosity', verbosity);
-            logger.logger.level = 'verbose';
-        }
-        if (verbosity === 2) {
-            _.set(settings, 'verbosity', verbosity);
-            logger.logger.level = 'debug';
-        }
-        if (verbosity === 3) {
-            _.set(settings, 'verbosity', verbosity);
-            logger.logger.level = 'silly';
-        }
-    }
 
     const profile = path.resolve(settings.rcfile);
 
     // configstore service
     log.info(`Loading configuration from ${chalk.yellow(JSON.stringify(profile))}`);
+
     config.load(profile);
 
     settings.rcfile = profile;
@@ -92,57 +74,40 @@ const createServer = (options, callback) => {
     }
 
     // Data storage initialize
+    log.info('Initializing user data storage...');
     DataStorage.init();
 
     process.env.Tmpdir = DataStorage.tmpDir;
 
-    // // Bugfix on Jimp's greyscale. ...moved to server/lib/jimp
+    const app = createApplication();
 
     const { port = 0, host, backlog } = options;
-    const routes = [];
-    if (typeof options.mount === 'object') {
-        routes.push({
-            type: 'static',
-            route: options.mount.url,
-            directory: options.mount.path
-        });
-    }
+    const server = http.createServer(app);
+    server.listen(port, host, backlog, () => {
+        // Start socket service
+        startServices(server);
 
-    routes.push({
-        type: 'server',
-        route: '/',
-        server: () => createApplication()
+        // Deal with address bindings
+        const realAddress = server.address().address;
+        const realPort = server.address().port;
+        callback && callback(null, {
+            address: realAddress,
+            port: realPort
+        });
+
+        log.info(`Starting the server at ${chalk.cyan(`http://${realAddress}:${realPort}`)}`);
+
+        dns.lookup(os.hostname(), { family: 4, all: true }, (err, addresses) => {
+            if (err) {
+                log.error(`Can't resolve host name: ${err}`);
+                return;
+            }
+
+            addresses.forEach(({ address }) => {
+                log.info(`Starting the server at ${chalk.cyan(`http://${address}:${realPort}`)}`);
+            });
+        });
     });
-    webappengine({ port, host, backlog, routes })
-        .on('ready', (server) => {
-            // Start socket service
-            startServices(server);
-
-            // Deal with address bindings
-            const realAddress = server.address().address;
-            const realPort = server.address().port;
-            callback && callback(null, {
-                address: realAddress,
-                port: realPort
-            });
-
-            log.info(`Starting the server at ${chalk.cyan(`http://${realAddress}:${realPort}`)}`);
-
-            dns.lookup(os.hostname(), { family: 4, all: true }, (err, addresses) => {
-                if (err) {
-                    log.error('Can\'t resolve host name:', err);
-                    return;
-                }
-
-                addresses.forEach(({ address }) => {
-                    log.info(`Starting the server at ${chalk.cyan(`http://${address}:${realPort}`)}`);
-                });
-            });
-        })
-        .on('error', (err) => {
-            callback && callback(err);
-            log.error(err);
-        });
 };
 
 export {

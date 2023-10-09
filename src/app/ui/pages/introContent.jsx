@@ -1,25 +1,46 @@
 import React from 'react';
 
+/**
+ * Get step intro node from text.
+ *
+ * @param text - text to be displayed.
+ */
+const getStepIntroFromText = (text) => (
+    <div>
+        {text}
+    </div>
+);
+
 const printIntroStepOne = (text) => (
     <div>
         {text}
     </div>
 );
 
-const printIntroStepTwo = (text) => (
+const printIntroStepThree = (text1) => (
     <div>
-        {text}
+        {text1}
     </div>
 );
-
-const printIntroStepThree = (text1, text2, text3) => (
+const printIntroStepFour = (text1) => (
+    <div>
+        {text1}
+    </div>
+);
+const printIntroStepFive = (text1, text2) => (
+    <div>
+        <div>{text1}</div>
+        <div>{text2}</div>
+    </div>
+);
+const printIntroStepSix = (text1, text2, text3) => (
     <div>
         <div>{text1}</div>
         <div>{text2} <img src="/resources/images/guide-tours/icon_setting_32x32.png" alt="" className="width-32" /> {text3}</div>
     </div>
 );
 
-const printIntroStepFour = (text1, text2, isOriginal) => (
+const printIntroStepSeven = (text1, text2, isOriginal) => (
     <div>
         <div>{text1}</div>
         <div>{text2}</div>
@@ -27,19 +48,18 @@ const printIntroStepFour = (text1, text2, isOriginal) => (
     </div>
 );
 
-const printIntroStepFive = (text1) => (
+const printIntroStepEight = (text1) => (
+    <div>
+        {text1}
+    </div>
+);
+const printIntroStepNine = (text1) => (
     <div>
         {text1}
     </div>
 );
 
-const printIntroStepSix = (text1) => (
-    <div>
-        {text1}
-    </div>
-);
-
-const laserCncIntroStepOne = (text1, text2, text3) => {
+const laserCncIntroStepOne = (text1, text2, text3, text4, text5, text6, text7 = null) => {
     return (
         <div className="laser-intro-one-content">
             <div className="top-content">
@@ -49,8 +69,20 @@ const laserCncIntroStepOne = (text1, text2, text3) => {
             </div>
             <div className="bottom-content">
                 <div>{text3}</div>
+                <ol>
+                    <li>{text4}</li>
+                    <li>{text5}</li>
+                </ol>
+                <div>{text6}</div>
                 <img src="/resources/images/guide-tours/pic_job_setup_3aix_zero_102x102.png" alt="" className="width-102 job-setup-img" />
             </div>
+            {
+                text7 && (
+                    <div className="margin-top-8">
+                        <div>{text7}</div>
+                    </div>
+                )
+            }
         </div>
     );
 };
@@ -141,11 +173,14 @@ const cnc4AxisStepOne = (text1, text2, text3) => {
 
 export {
     printIntroStepOne,
-    printIntroStepTwo,
+    getStepIntroFromText,
     printIntroStepThree,
     printIntroStepFour,
     printIntroStepFive,
     printIntroStepSix,
+    printIntroStepSeven,
+    printIntroStepEight,
+    printIntroStepNine,
     laserCncIntroStepOne,
     laserCncIntroStepTwo,
     laserCncIntroStepFive,

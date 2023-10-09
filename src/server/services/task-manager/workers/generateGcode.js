@@ -1,11 +1,13 @@
 import fs from 'fs';
 import _ from 'lodash';
 import path from 'path';
-import { GcodeGenerator } from '../../../lib/GcodeGenerator';
-import logger from '../../../lib/logger';
+
 import { pathWithRandomSuffix } from '../../../../shared/lib/random-utils';
 import { isNull } from '../../../../shared/lib/utils';
+import { GcodeGenerator } from '../../../lib/GcodeGenerator';
+import logger from '../../../lib/logger';
 import sendMessage from '../utils/sendMessage';
+import { JobOffsetMode } from '../../../../app/constants/coordinate';
 
 
 const log = logger('service:TaskManager');
@@ -40,8 +42,9 @@ const addHeaderToFile = (header, name, tmpFilePath, filePath, thumbnail, estimat
                     size: ws.bytesWritten,
                     lastModified: +new Date(),
                     estimatedTime,
-                    thumbnail: thumbnail
-                }
+                    thumbnail: thumbnail,
+                },
+                filePath
             });
         });
     });
@@ -78,7 +81,7 @@ const checkoutBoundingBoxIsNull = (boundingBox) => {
 };
 
 // eslint-disable-next-line consistent-return
-const generateGcode = (toolPaths) => {
+const generateGcode = ({ toolPaths, size, toolHead, origin, jobOffsetMode, series, metadata }) => {
     if (!toolPaths && !_.isArray(toolPaths) && toolPaths.length === 0) {
         return sendMessage({ status: 'fail', value: 'modelInfo is empty.' });
     }
@@ -118,17 +121,24 @@ const generateGcode = (toolPaths) => {
             const gcodeGenerator = new GcodeGenerator();
             let gcodeLines;
             if (headType === 'laser') {
-                gcodeLines = gcodeGenerator.parseAsLaser(toolPathObj, gcodeConfig);
+                if (metadata?.gcodeFlavor === 'grbl') {
+                    gcodeLines = gcodeGenerator.parseAsGrblLaser(toolPathObj, gcodeConfig);
+                } else {
+                    gcodeLines = gcodeGenerator.parseAsLaser(toolPathObj, gcodeConfig);
+                }
             } else {
                 gcodeLines = gcodeGenerator.parseAsCNC(toolPathObj, gcodeConfig);
             }
 
             const renderMethod = gcodeConfig.movementMode === 'greyscale-dot' ? 'point' : 'line';
+            const maxPowerNumber = metadata?.gcodeFlavor === 'grbl' ? 1000 : 255;
+            const maxPower = (gcodeConfig.fixedPowerEnabled ? gcodeConfig.fixedPower : 100) / 100 * maxPowerNumber;
 
             if (i > 0 || j > 0) {
                 const header = '\n\n'
                     + ';Header Start\n'
                     + `;renderMethod: ${renderMethod}\n`
+                    + `;max_power: ${maxPower}\n`
                     + ';Header End\n'
                     + '\n';
                 writeStream.write(header);
@@ -178,12 +188,21 @@ const generateGcode = (toolPaths) => {
 
     const { gcodeConfig, thumbnail } = toolPaths[0];
     const renderMethod = gcodeConfig.movementMode === 'greyscale-dot' ? 'point' : 'line';
+    const maxPowerNumber = metadata?.gcodeFlavor === 'grbl' ? 1000 : 255;
+    const maxPower = (gcodeConfig.fixedPowerEnabled ? gcodeConfig.fixedPower : 100) / 100 * maxPowerNumber;
 
     const power = gcodeConfig.fixedPowerEnabled ? gcodeConfig.fixedPower : 0;
 
+    const hasThumbnail = series !== 'Ray';
+
+    const headerGcodes = [];
     let headerStart = ';Header Start\n'
         + `;header_type: ${headType}\n`
+        + `;tool_head: ${toolHead}\n`
+        + `;machine: ${series}\n`
+        + `;gcode_flavor: ${metadata?.gcodeFlavor ? metadata?.gcodeFlavor : 'marlin'}\n`
         + `;renderMethod: ${renderMethod}\n`
+        + `;max_power: ${maxPower}\n`
         + ';file_total_lines: fileTotalLines\n'
         + `;estimated_time(s): ${estimatedTime}\n`
         + `;is_rotate: ${isRotate}\n`
@@ -199,9 +218,32 @@ const generateGcode = (toolPaths) => {
         + `;work_speed(mm/minute): ${gcodeConfig.workSpeed}\n`
         + `;jog_speed(mm/minute): ${gcodeConfig.jogSpeed}\n`
         + `;power(%): ${power}\n`
-        + `;thumbnail: ${thumbnail}\n`
-        + ';Header End\n'
-        + '\n';
+        + `;work_size_x: ${size.x}\n`
+        + `;work_size_y: ${size.y}\n`
+        + `;origin: ${origin}\n`;
+
+    // thumbnail
+    if (hasThumbnail) {
+        headerGcodes.push(
+            `;thumbnail: ${thumbnail}`,
+        );
+    }
+
+    if (headType === 'laser' && jobOffsetMode === JobOffsetMode.Crosshair) {
+        headerGcodes.push(
+            'M2003', // crosshair offset
+            'M2004', // move
+        );
+    }
+
+    // header end
+    headerGcodes.push(
+        ';Header End',
+        '',
+    );
+
+    // add header codes
+    headerStart += headerGcodes.join('\n');
 
     fileTotalLines += headerStart.split('\n').length - 1;
 

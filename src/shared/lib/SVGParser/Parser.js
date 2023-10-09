@@ -1,20 +1,20 @@
 import fs from 'fs';
+import { cloneDeep, isNil } from 'lodash';
+import log from 'loglevel';
 import path from 'path';
 import xml2js from 'xml2js';
-import { cloneDeep, isNil } from 'lodash';
 import AttributesParser from './AttributesParser';
-import SVGTagParser from './SVGTagParser';
 // import DefsTagParser from './DefsTagParser';
 import CircleTagParser from './CircleTagParser';
+import { SVG_ATTR_HREF, SVG_ATTR_ID, SVG_ATTR_TRANSFORM, SVG_TAG_SVG, SVG_TAG_USE, XLINK_HREF } from './constants';
 import EllipseTagParser from './EllipseTagParser';
 import LineTagParser from './LineTagParser';
 import PathTagParser from './PathTagParser';
 import PolygonTagParser from './PolygonTagParser';
 import PolylineTagParser from './PolylineTagParser';
 import RectTagParser from './RectTagParser';
+import SVGTagParser from './SVGTagParser';
 import TextParser from './TextParser';
-import { SVG_ATTR_ID, XLINK_HREF, SVG_ATTR_HREF,
-    SVG_ATTR_TRANSFORM, SVG_TAG_USE, SVG_TAG_SVG } from './constants';
 // const DEFAULT_DPI = 72;
 const DEFAULT_MILLIMETER_PER_PIXEL = 25.4 / 72;
 // TODO: General tolerance does not work well if original drawing is small,
@@ -151,8 +151,8 @@ class SVGParser {
 
     async parseObject(node, element = SVG_TAG_SVG) {
         const initialAttributes = {
-            fill: '#000000',
-            stroke: null,
+            fill: 'none',
+            stroke: '#000000',
             strokeWidth: 1,
             fontSize: 16,
             // fontFamily: 'auto',
@@ -191,13 +191,25 @@ class SVGParser {
                 boundingBox.maxY = Math.max(boundingBox.maxY, shape.boundingBox.maxY);
             }
         }
+
+        // Use actual bounding box
+        // FIXME: Revert to use original attributes, cuz image size should be change on frontend too
+        // const width = boundingBox.maxX - boundingBox.minX;
+        // const height = boundingBox.maxY - boundingBox.minY;
+        // const viewBox = [boundingBox.minX, boundingBox.minY, width, height];
+        // const widthRatio = root.attributes.viewBox[2] / root.attributes.width;
+        // const heightRatio = root.attributes.viewBox[3] / root.attributes.height;
+
         return {
             shapes: root.shapes,
             boundingBox: boundingBox,
             parsedNode: parsedNode,
             viewBox: root.attributes.viewBox,
             width: root.attributes.width,
-            height: root.attributes.height
+            height: root.attributes.height,
+            // viewBox,
+            // width: width / widthRatio,
+            // height: height / heightRatio, // root.attributes.height,
         };
     }
 
@@ -240,7 +252,7 @@ class SVGParser {
                             parent[shadowTag] = [shadowNode];
                         }
                     } else {
-                        console.log(`def which id is ${url} doesn't exist`);
+                        log.warn(`def which id is ${url} doesn't exist`);
                     }
                 }
             }

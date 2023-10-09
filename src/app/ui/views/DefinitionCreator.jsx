@@ -1,11 +1,13 @@
 import React, { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import PropTypes from 'prop-types';
+import { Divider } from 'antd';
 import { Radio } from '../components/Radio';
 import Select from '../components/Select';
-import { TextInput as Input } from '../components/Input';
+import { TextInput as Input, TextInput } from '../components/Input';
 import { PRINTING_MANAGER_TYPE_MATERIAL, PRINTING_MANAGER_TYPE_QUALITY, HEAD_CNC, HEAD_LASER } from '../../constants';
 
 import i18n from '../../lib/i18n';
+import SvgIcon from '../components/SvgIcon';
 
 /**
  * relationship between UI and placeholder
@@ -74,28 +76,34 @@ const describeCreator = (managerType) => {
     };
 };
 
-const DefinitionCreator = ({
-    managerType, isCreate, copyType, copyCategoryName, copyCategoryI18n, copyItemName, materialOptions
+const DefinitionCreator = forwardRef(({
+    showRadio = true, managerType, isCreate, copyType, copyCategoryName, copyItemName, materialOptions: _materialOptions
 }, ref) => {
     const [displayDescribe] = useState(describeCreator(managerType));
-
+    const [newOptionValue, setNewOptionsValue] = useState('');
+    const [materialOptions, setMaterialOptions] = useState(_materialOptions);
     const [state, setState] = useState({
-        createType: 'Category',
+        createType: copyType || 'Category',
         categoryName: '',
-        categoryI18n: '',
         itemName: '',
     });
     useEffect(() => {
+        const option = _materialOptions[0];
+        if (!copyCategoryName && option) {
+            copyCategoryName = option.label;
+        }
         setState((pre) => {
             return {
                 ...pre,
                 itemName: copyItemName || displayDescribe.itemName,
                 categoryName: copyCategoryName || displayDescribe.categoryName,
-                categoryI18n: copyCategoryI18n
             };
         });
-    }, [managerType, copyItemName, copyCategoryName, displayDescribe.categoryName, displayDescribe.itemName, copyCategoryI18n]);
+    }, [_materialOptions, managerType, copyItemName, copyCategoryName, displayDescribe.categoryName, displayDescribe.itemName]);
 
+    useEffect(() => {
+        setMaterialOptions(_materialOptions);
+    }, [_materialOptions]);
     useImperativeHandle(ref, () => ({
         getData: () => {
             return state;
@@ -148,9 +156,48 @@ const DefinitionCreator = ({
                                 setState({
                                     ...state,
                                     categoryName: option.label,
-                                    categoryI18n: option.i18n
                                 });
                             }}
+                            dropdownRender={menu => (
+                                <>
+                                    {menu}
+                                    {!(managerType === PRINTING_MANAGER_TYPE_MATERIAL && !isCreate) && (
+                                        <>
+                                            <Divider style={{ margin: '0' }} />
+                                            <TextInput
+                                                value={newOptionValue}
+                                                bordered={false}
+                                                placeholder={i18n._(
+                                                    'key-Printing/PrintingConfigurations-Add Item'
+                                                )}
+                                                onChange={e => setNewOptionsValue(e.target.value)}
+                                            />
+                                            {!!newOptionValue && (
+                                                <SvgIcon
+                                                    className="margin-top-2"
+                                                    color="#1890FF"
+                                                    name="CameraCaptureExtract"
+                                                    onClick={() => {
+                                                        setMaterialOptions([
+                                                            ...materialOptions,
+                                                            {
+                                                                label: newOptionValue,
+                                                                value: newOptionValue,
+                                                                i18n: newOptionValue
+                                                            }
+                                                        ]);
+                                                        setNewOptionsValue('');
+                                                        setState({
+                                                            ...state,
+                                                            categoryName: newOptionValue,
+                                                        });
+                                                    }}
+                                                />
+                                            )}
+                                        </>
+                                    )}
+                                </>
+                            )}
                         />
                     </>
 
@@ -159,29 +206,35 @@ const DefinitionCreator = ({
             </div>
         );
     };
-
     if (isCreate) {
-        return (
-            <Radio.Group
-                name="comic"
-                value={state.createType}
-                onChange={(event) => {
-                    const value = event.target.value;
-                    setState({ ...state, createType: value });
-                }}
-            >
-                <div>
-                    <Radio value="Category" className="height-24">{displayDescribe.createCategoryDescribe}</Radio>
-                    {state.createType === 'Category' && renderCategoryCreate()}
-                </div>
+        if (!showRadio) {
+            return (
+                <>
+                    {renderItemCreate()}
+                </>
+            );
+        } else {
+            return (
+                <Radio.Group
+                    name="comic"
+                    value={state.createType}
+                    onChange={(event) => {
+                        const value = event.target.value;
+                        setState({ ...state, createType: value });
+                    }}
+                >
+                    <div>
+                        <Radio value="Category" className="height-24">{displayDescribe.createCategoryDescribe}</Radio>
+                        {state.createType === 'Category' && renderCategoryCreate()}
+                    </div>
 
-                <div className="margin-top-16">
-                    <Radio value="Item" className="height-24">{displayDescribe.createItemDescribe}</Radio>
-                    {state.createType === 'Item' && renderItemCreate()}
-                </div>
-
-            </Radio.Group>
-        );
+                    <div className="margin-top-16">
+                        <Radio value="Item" className="height-24">{displayDescribe.createItemDescribe}</Radio>
+                        {state.createType === 'Item' && renderItemCreate()}
+                    </div>
+                </Radio.Group>
+            );
+        }
     } else {
         if (copyType === 'Category') {
             return renderCategoryCreate();
@@ -189,15 +242,15 @@ const DefinitionCreator = ({
             return renderItemCreate();
         }
     }
-};
+});
 
 DefinitionCreator.propTypes = {
     managerType: PropTypes.string.isRequired,
+    showRadio: PropTypes.bool,
     isCreate: PropTypes.bool,
     copyType: PropTypes.string,
     copyCategoryName: PropTypes.string,
-    copyCategoryI18n: PropTypes.string,
     copyItemName: PropTypes.string,
     materialOptions: PropTypes.array
 };
-export default forwardRef(DefinitionCreator);
+export default DefinitionCreator;

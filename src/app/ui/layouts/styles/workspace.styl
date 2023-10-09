@@ -1,13 +1,18 @@
-@import "../../../styles/variables.styl"
+@import '../../../styles/variables.styl';
 
 .workspace {
     .workspace-table {
         display: flex;
-        height: calc(100vh - 66px);
+        height: calc(100vh - 74px);
         overflow: hidden;
         background-color: #F5F5F7;
     }
-    .main-bar{
+
+    .workspace-table-for-long-lang {
+        height: calc(100vh - 74px);
+    }
+
+    .main-bar {
         width: 100%;
         padding: 4px 8px;
         background-color: #FFFFFF;
@@ -22,14 +27,11 @@
         height: 100%;
         order: 1;
     }
-    .visualizer{
+
+    .visualizer {
         flex: 1;
         order: 0;
     }
-
-    // .default-container {
-    //     min-width: 360px;
-    // }
 }
 
 [class~='appbar'] {

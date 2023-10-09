@@ -1,46 +1,35 @@
 /* eslint callback-return: 0 */
-import _ from 'lodash';
-import fs from 'fs';
-import path from 'path';
-import express from 'express';
-import expressJwt from 'express-jwt';
-import jwt from 'jsonwebtoken';
-import engines from 'consolidate';
-import 'hogan.js'; // required by consolidate
-import errorhandler from 'errorhandler';
-import favicon from 'serve-favicon';
-import cookieParser from 'cookie-parser';
 import bodyParser from 'body-parser';
+import compress from 'compression';
 import multiparty from 'connect-multiparty';
 import connectRestreamer from 'connect-restreamer';
+import engines from 'consolidate';
+import cookieParser from 'cookie-parser';
+import errorhandler from 'errorhandler';
+import express from 'express';
+import expressJwt from 'express-jwt';
+import session from 'express-session';
+import * as fs from 'fs-extra';
+import 'hogan.js'; // required by consolidate
+import i18next from 'i18next';
+import i18nextHttpMiddleware from 'i18next-http-middleware';
+import i18nextBackend from 'i18next-node-fs-backend';
+import jwt from 'jsonwebtoken';
+import _ from 'lodash';
 import methodOverride from 'method-override';
 import morgan from 'morgan';
-import compress from 'compression';
-import session from 'express-session';
-import sessionFileStore from 'session-file-store';
-import i18next from 'i18next';
-import i18nextBackend from 'i18next-node-fs-backend';
-import mkdirp from 'mkdirp';
+import path from 'path';
 import rangeCheck from 'range_check';
-import {
-    LanguageDetector as i18nextLanguageDetector,
-    handle as i18nextHandle
-} from 'i18next-express-middleware';
-import urljoin from './lib/urljoin';
-import logger from './lib/logger';
-import { registerApis } from './services';
+import favicon from 'serve-favicon';
+import sessionFileStore from 'session-file-store';
 import settings from './config/settings';
-// import errclient from './lib/middleware/errclient';
-// import errlog from './lib/middleware/errlog';
-// import errnotfound from './lib/middleware/errnotfound';
-// import errserver from './lib/middleware/errserver';
-import config from './services/configstore';
-import {
-    IP_WHITELIST,
-    ERR_UNAUTHORIZED,
-    ERR_FORBIDDEN
-} from './constants';
+import { ERR_FORBIDDEN, ERR_UNAUTHORIZED, IP_WHITELIST } from './constants';
 import DataStorage from './DataStorage';
+import logger from './lib/logger';
+import urljoin from './lib/urljoin';
+import { registerApis } from './services';
+import config from './services/configstore';
+
 
 const log = logger('app');
 
@@ -69,10 +58,6 @@ const createApplication = () => {
 
     // Settings
     if (process.env.NODE_ENV === 'development') {
-        const webpackDevServer = require('./webpack-dev-server').default;
-
-        webpackDevServer(app);
-
         // Error handler - https://github.com/expressjs/errorhandler
         // Development error handler, providing stack traces and error message responses
         // for requests accepting text, html, or json.
@@ -104,12 +89,6 @@ const createApplication = () => {
     ]); // The view directory path
 
     log.debug('app.settings: %j', app.settings);
-
-    // Setup i18n (i18next)
-    i18next
-        .use(i18nextBackend)
-        .use(i18nextLanguageDetector)
-        .init(settings.i18next);
 
     // Check if client's IP address is in the whitelist
     app.use((req, res, next) => {
@@ -151,7 +130,7 @@ const createApplication = () => {
             }
         }
     }
-    mkdirp.sync(sessionPath);
+    fs.ensureDir(sessionPath);
     const FileStore = sessionFileStore(session);
     app.use(session({
         ...settings.middleware.session,
@@ -215,12 +194,20 @@ const createApplication = () => {
 
     app.use('/data', express.static(DataStorage.userDataDir));
 
-    app.use(i18nextHandle(i18next, {}));
+    // Setup i18n (i18next)
+    i18next
+        .use(i18nextBackend)
+        .use(i18nextHttpMiddleware.LanguageDetector)
+        .init(settings.i18next);
+
+    // app.use(i18nextHandle(i18next, {}));
+    app.use(i18nextHttpMiddleware.handle(i18next));
 
     // Secure API Access
     app.use(urljoin(settings.route, 'api'), expressJwt({
         secret: config.get('secret'),
-        credentialsRequired: true
+        algorithms: ['HS256'],
+        credentialsRequired: true,
     }));
 
     app.use((err, req, res, next) => {
@@ -255,6 +242,7 @@ const createApplication = () => {
 
     // register http service api
     registerApis(app);
+
     // Also see "src/app/app.js"
     app.use((req, res) => {
         if (req.method === 'OPTIONS') {

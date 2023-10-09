@@ -1,14 +1,19 @@
-import isElectron from 'is-electron';
-import request from 'superagent';
-import FileSaver from 'file-saver';
-import { isNil } from 'lodash';
 import events from 'events';
+import FileSaver from 'file-saver';
+import i18next from 'i18next';
+import isElectron from 'is-electron';
+import { isNil } from 'lodash';
 import path from 'path';
-import i18n from './i18n';
+import request from 'superagent';
+
 import pkg from '../../../package.json';
 import { DATA_PATH } from '../constants';
+import Dialog from './dialog';
+import i18n from './i18n';
+import DownloadManager from './download-mananger';
 
-class AppbarMenuEvent extends events.EventEmitter { }
+class AppbarMenuEvent extends events.EventEmitter {
+}
 
 const menuEvent = new AppbarMenuEvent();
 /**
@@ -59,20 +64,41 @@ const Event = {
     }
 };
 
+function getAutoUpdateProviderOptions() {
+    // Use aliyun as zh users' auto update server
+    if (i18next.language === 'zh-CN') {
+        return {
+            provider: 'generic',
+            url: 'https://snapmaker.oss-cn-beijing.aliyuncs.com/snapmaker.com/download/luban',
+        };
+    }
+
+    // Use Github as default auto update server
+    return {
+        provider: 'generic',
+        repo: 'https://github.com/Snapmaker/Luban',
+        url: 'https://github.com/Snapmaker/Luban/releases/latest/download',
+    };
+}
+
 /**
  *  Update control in electron
  */
 const Update = {
     checkForUpdate() {
-        if (isElectron()) {
-            const { ipcRenderer } = window.require('electron');
-            ipcRenderer.send('checkForUpdate');
+        if (!isElectron()) {
+            return;
         }
+
+        const providerOptions = getAutoUpdateProviderOptions();
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.send('checkForUpdate', providerOptions);
     },
     // TODO: useless
     downloadUpdate(downloadInfo, oldVersion, shouldCheckForUpdate) {
         if (isElectron()) {
-            const { remote, ipcRenderer } = window.require('electron');
+            const { ipcRenderer } = window.require('electron');
+            const { remote } = window.require('@electron/remote');
             const { dialog } = remote;
             const { releaseName, releaseNotes } = downloadInfo;
             const dialogOpts = {
@@ -97,7 +123,7 @@ const Update = {
     },
     downloadHasStarted() {
         if (isElectron()) {
-            const { remote } = window.require('electron');
+            const remote = window.require('@electron/remote');
             const { dialog } = remote;
 
             const dialogOpts = {
@@ -111,7 +137,8 @@ const Update = {
     },
     isReplacingAppNow(downloadInfo) {
         if (isElectron()) {
-            const { remote, ipcRenderer } = window.require('electron');
+            const { ipcRenderer } = window.require('electron');
+            const remote = window.require('@electron/remote');
             const { dialog } = remote;
             const { releaseName } = downloadInfo;
 
@@ -138,8 +165,8 @@ const Update = {
 const Menu = {
     setItemEnabled(id, enabled) {
         if (isElectron()) {
-            const { remote } = window.require('electron');
-            const appMenu = remote.Menu.getApplicationMenu();
+            const { Menu: ElectronMenu } = window.require('@electron/remote');
+            const appMenu = ElectronMenu.getApplicationMenu();
             const item = appMenu.getMenuItemById(id);
             item.enabled = enabled;
         }
@@ -152,9 +179,9 @@ const Menu = {
     },
     replaceMenu(newMenuTemplate) {
         if (isElectron()) {
-            const appMenu = window.require('electron').remote.Menu;
-            const menu = appMenu.buildFromTemplate(newMenuTemplate);
-            appMenu.setApplicationMenu(menu);
+            const { Menu: ElectronMenu } = window.require('@electron/remote');
+            const appMenu = ElectronMenu.buildFromTemplate(newMenuTemplate);
+            ElectronMenu.setApplicationMenu(appMenu);
         }
     }
 };
@@ -179,7 +206,7 @@ const File = {
     save(targetFile, tmpFile, callback) {
         if (isElectron()) {
             const fs = window.require('fs');
-            const app = window.require('electron').remote.app;
+            const { app } = window.require('@electron/remote');
             tmpFile = app.getPath('userData') + tmpFile;
 
             fs.copyFileSync(tmpFile, targetFile);
@@ -204,7 +231,7 @@ const File = {
     saveAs(targetFile, tmpFile, callback = undefined) {
         if (isElectron()) {
             const fs = window.require('fs');
-            const { app } = window.require('electron').remote;
+            const { app } = window.require('@electron/remote');
             const defaultPath = path.resolve(app.getPath('downloads'), path.basename(tmpFile));
             tmpFile = app.getPath('userData') + tmpFile;
             // eslint-disable-next-line no-use-before-define
@@ -219,8 +246,6 @@ const File = {
                 const file = { path: targetFile, name: window.require('path').basename(targetFile) };
 
                 fs.copyFileSync(tmpFile, targetFile);
-                // const menu = window.require('electron').remote.require('./electron-app/Menu');
-                // menu.addRecentFile(file);
                 const { ipcRenderer } = window.require('electron');
                 ipcRenderer.send('add-recent-file', file);
 
@@ -257,14 +282,14 @@ const File = {
             renderGcodeFileName = targetFile;
         } else {
             if (renderGcodeFileName.slice(renderGcodeFileName.length - 9) === '.def.json') {
-                renderGcodeFileName = renderGcodeFileName.slice(renderGcodeFileName.length - 9);
+                renderGcodeFileName = renderGcodeFileName;
             } else {
                 renderGcodeFileName = path.basename(renderGcodeFileName);
             }
         }
         if (isElectron()) {
             const fs = window.require('fs');
-            const { app } = window.require('electron').remote;
+            const { app } = window.require('@electron/remote');
             const defaultPath = path.resolve(app.getPath('downloads'), renderGcodeFileName);
             tmpFile = app.getPath('userData') + tmpFile;
             // eslint-disable-next-line no-use-before-define
@@ -327,84 +352,12 @@ const File = {
     },
     resolveDownloadsPath(tmpFile) {
         if (isElectron()) {
-            const { app } = window.require('electron').remote;
+            const { app } = window.require('@electron/remote');
             const defaultPath = path.resolve(app.getPath('downloads'), path.basename(tmpFile));
             return defaultPath;
         } else {
             return tmpFile;
         }
-    }
-};
-
-/**
- * Dialogs control in electron
- */
-const Dialog = {
-    async showOpenFileDialog(type) {
-        type = typeof type === 'string' ? type.slice(1) : '';
-        let extensions = ['snap3dp', 'snaplzr', 'snapcnc'];
-        switch (type) { // substring '/3dp' to '3dp'
-            case 'printing':
-                extensions = ['stl', 'obj'];
-                break;
-            case 'laser-rotate':
-                extensions = ['svg', 'png', 'jpg', 'jpeg', 'bmp', 'dxf'];
-                break;
-            case 'laser':
-                extensions = ['svg', 'png', 'jpg', 'jpeg', 'bmp', 'dxf', 'stl'];
-                break;
-            case 'cnc':
-                extensions = ['svg', 'png', 'jpg', 'jpeg', 'bmp', 'dxf', 'stl'];
-                break;
-            case 'workspace':
-                extensions = ['gcode', 'nc', 'cnc'];
-                break;
-            default: break;
-        }
-
-        if (isElectron()) {
-            const { remote } = window.require('electron');
-            const currentWindow = remote.getCurrentWindow();
-            const openDialogReturnValue = await remote.dialog.showOpenDialog(
-                currentWindow,
-                {
-                    title: 'Snapmaker Luban',
-                    filters: [{ name: 'files', extensions }]
-                }
-            );
-            const filePaths = openDialogReturnValue.filePaths;
-            if (!filePaths || !filePaths[0]) return null;
-            const file = { path: filePaths[0], name: window.require('path').basename(filePaths[0]) };
-            return file;
-        }
-        return null;
-    },
-    showMessageBox(options, modal = true) {
-        if (isElectron()) {
-            const remote = window.require('electron').remote;
-            const { dialog } = remote;
-            options.title = 'Snapmaker Luban';
-            if (modal) {
-                const currentWindow = remote.getCurrentWindow();
-                return dialog.showMessageBox(currentWindow, options);
-            }
-            return dialog.showMessageBox(options);
-        } else {
-            return window.confirm(options.message);
-        }
-    },
-    showSaveDialog(options, modal = true) {
-        if (isElectron()) {
-            const remote = window.require('electron').remote;
-            const { dialog } = remote;
-            options.title = 'Snapmaker Luban';
-            if (modal) {
-                const currentWindow = remote.getCurrentWindow();
-                return dialog.showSaveDialog(currentWindow, options);
-            }
-            return dialog.showSaveDialog(options);
-        }
-        return null;
     }
 };
 
@@ -419,13 +372,15 @@ const Window = {
 
     call(func) {
         if (isElectron()) {
-            window.require('electron').remote.getCurrentWindow()[func]();
+            const { getCurrentWindow } = window.require('@electron/remote');
+            getCurrentWindow()[func]();
         }
     },
 
     initWindow() {
         if (isElectron()) {
-            this.window = window.require('electron').remote.getCurrentWindow();
+            const { getCurrentWindow } = window.require('@electron/remote');
+            this.window = getCurrentWindow();
             this.initTitle = `Snapmaker Luban ${pkg.version}`;
         } else {
             this.window = {
@@ -476,7 +431,8 @@ const Window = {
     },
     toggleFullscreen() {
         if (isElectron()) {
-            const browserWindow = window.require('electron').remote.BrowserWindow.getFocusedWindow();
+            const { BrowserWindow } = window.require('@electron/remote');
+            const browserWindow = BrowserWindow.getFocusedWindow();
             if (browserWindow.isFullScreen()) {
                 browserWindow.setFullScreen(false);
             } else {
@@ -494,12 +450,14 @@ const Window = {
     },
     toggleDeveloperTools() {
         if (isElectron()) {
-            window.require('electron').remote.getCurrentWebContents().toggleDevTools();
+            const { getCurrentWebContents } = window.require('@electron/remote');
+            getCurrentWebContents().toggleDevTools();
         }
     },
     openLink(url) {
         if (isElectron()) {
-            window.require('electron').remote.shell.openExternal(url);
+            const { shell } = window.require('@electron/remote');
+            shell.openExternal(url);
         } else {
             window.open(url);
         }
@@ -520,7 +478,8 @@ const Connection = {
 const APP = {
     quit() {
         if (isElectron()) {
-            window.require('electron').remote.app.quit();
+            const { app } = window.require('@electron/remote');
+            app.quit();
         } else {
             window.top.close();
         }
@@ -528,11 +487,12 @@ const APP = {
 };
 
 export default {
+    DownloadManager,
     Update,
     Event,
     Menu,
-    File,
     Dialog,
+    File,
     Window,
     Connection,
     APP

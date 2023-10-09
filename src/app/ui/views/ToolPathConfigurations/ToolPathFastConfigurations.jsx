@@ -12,6 +12,7 @@ import { Button } from '../../components/Buttons';
 import { toHump, toLine } from '../../../../shared/lib/utils';
 import ToolParameters from './cnc/ToolParameters';
 import ToolSelector from './cnc/ToolSelector';
+import { editorStore } from '../../../store/local-storage';
 
 import {
     CNC_DEFAULT_GCODE_PARAMETERS_DEFINITION,
@@ -90,9 +91,12 @@ function getFastEditSettingsKeys(toolPath) {
 
 
 function ToolPathFastConfigurations({ setEditingToolpath, headType, toolpath }) {
+    const activeMachine = useSelector(state => state.machine.activeMachine);
     const activeToolListDefinition = useSelector(state => state[headType]?.activeToolListDefinition, shallowEqual);
     const toolDefinitions = useSelector(state => state[headType]?.toolDefinitions, shallowEqual);
+
     const dispatch = useDispatch();
+
     const [toolPath, setToolPath] = useState(toolpath);
     const [currentToolDefinition, setCurrentToolDefinition] = useState(activeToolListDefinition);
     const saveToolPath = async (toolDefinition) => {
@@ -133,6 +137,9 @@ function ToolPathFastConfigurations({ setEditingToolpath, headType, toolpath }) 
     };
     async function handleSelectorChange(value) {
         setCurrentToolDefinition(value);
+        if (value.definitionId) {
+            editorStore.set(`${headType}LastDefinitionId`, value.definitionId);
+        }
         if (value?.definitionId !== activeToolListDefinition?.definitionId) {
             await dispatch(editorActions.changeActiveToolListDefinition(headType, value?.definitionId, value?.name, true));
         }
@@ -171,9 +178,15 @@ function ToolPathFastConfigurations({ setEditingToolpath, headType, toolpath }) 
                 if (newSettings.jog_speed) newSettings.jog_speed.default_value = gcodeConfig?.jogSpeed;
                 if (newSettings.work_speed) newSettings.work_speed.default_value = gcodeConfig?.workSpeed;
                 if (newSettings.dwell_time) newSettings.dwell_time.default_value = gcodeConfig?.dwellTime;
+                if (newSettings.initial_height_offset) newSettings.initial_height_offset.default_value = gcodeConfig?.initialHeightOffset;
                 if (newSettings.multi_passes) newSettings.multi_passes.default_value = gcodeConfig?.multiPasses;
                 if (newSettings.multi_pass_depth) newSettings.multi_pass_depth.default_value = gcodeConfig?.multiPassDepth;
                 if (newSettings.fixed_power) newSettings.fixed_power.default_value = gcodeConfig?.fixedPower;
+                if (newSettings.fixed_min_power) newSettings.fixed_min_power.default_value = gcodeConfig?.fixedMinPower;
+                if (newSettings.power_level_divisions) newSettings.power_level_divisions.default_value = gcodeConfig?.powerLevelDivisions;
+                if (newSettings.auxiliary_air_pump) newSettings.auxiliary_air_pump.default_value = gcodeConfig?.auxiliaryAirPump;
+                if (newSettings.half_diode_mode) newSettings.half_diode_mode.default_value = gcodeConfig?.halfDiodeMode;
+                if (newSettings.constant_power_mode) newSettings.constant_power_mode.default_value = gcodeConfig?.constantPowerMode;
             }
         }
         if (currentToolDefinition?.definitionId !== activeToolDefinition?.definitionId) {
@@ -325,6 +338,11 @@ function ToolPathFastConfigurations({ setEditingToolpath, headType, toolpath }) 
         }
         if (headType === HEAD_LASER && activeToolListDefinition) {
             allDefinition = cloneDeep(LASER_DEFAULT_GCODE_PARAMETERS_DEFINITION);
+            if (activeMachine && activeMachine.metadata.size.z === 0) {
+                if (allDefinition.multiPassDepth) {
+                    delete allDefinition.multiPassDepth;
+                }
+            }
         }
         Object.keys(allDefinition).forEach((key) => {
             allDefinition[key].default_value = gcodeConfig[key];
@@ -339,6 +357,7 @@ function ToolPathFastConfigurations({ setEditingToolpath, headType, toolpath }) 
         });
     }
     const isModifiedDefinition = actions.checkIfDefinitionModified();
+
     return (
         <React.Fragment>
             <div className={classNames(
@@ -351,7 +370,7 @@ function ToolPathFastConfigurations({ setEditingToolpath, headType, toolpath }) 
                 <div className="sm-flex height-40 border-bottom-normal padding-horizontal-16">
                     <span className="sm-flex-width main-text-normal">{i18n._('key-unused-General Parameters')}</span>
                 </div>
-                <div className="padding-horizontal-16 padding-vertical-16">
+                <div className="padding-horizontal-16">
                     {toolPath.headType === HEAD_CNC && currentToolDefinition && (
                         <ToolSelector
                             toolDefinition={currentToolDefinition}

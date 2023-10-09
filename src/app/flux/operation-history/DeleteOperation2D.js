@@ -1,4 +1,4 @@
-import Operation from './Operation';
+import Operation from '../../core/Operation';
 
 export default class DeleteOperation2D extends Operation {
     state = {};
@@ -56,10 +56,12 @@ export default class DeleteOperation2D extends Operation {
         this.state.toolPaths = [];
 
         model.setParent(svgActions.svgContentGroup.group);
+        model.setPreSelection(svgActions.svgContentGroup.preSelectionGroup);
         modelGroup.object.add(model.meshObject);
         model.meshObject.addEventListener('update', modelGroup.onModelUpdate);
         modelGroup.models.push(model);
         modelGroup.models = [...modelGroup.models]; // trigger <ModelItem> component to show the unselected model
+        modelGroup.updateModelNameMap(model.modelName, model.baseName, 'add');
         modelGroup.modelChanged();
         svgActions.clearSelection();
 

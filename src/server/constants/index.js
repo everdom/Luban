@@ -1,3 +1,14 @@
+import {
+    SnapmakerOriginalMachine,
+    SnapmakerOriginalExtendedMachine,
+    SnapmakerA150Machine,
+    SnapmakerA250Machine,
+    SnapmakerA350Machine,
+    SnapmakerJ1Machine,
+    SnapmakerArtisanMachine,
+    SnapmakerRayMachine,
+} from '../../app/machines';
+
 // IP_WHITELIST
 export const IP_WHITELIST = [
     // IPv4 reserved space
@@ -18,7 +29,6 @@ export const IP_WHITELIST = [
     'fc00::/7', // Unique local address
     'fe80::/10' // Link-local address
 ];
-export const CONNECTION_MATERIALTHICKNESS_ABORT = 'connection:materialThickness_abort';
 // Error Codes
 export const ERR_BAD_REQUEST = 400;
 export const ERR_UNAUTHORIZED = 401;
@@ -31,17 +41,11 @@ export const ERR_LENGTH_REQUIRED = 411;
 export const ERR_PRECONDITION_FAILED = 412;
 export const ERR_PAYLOAD_TOO_LARGE = 413;
 export const ERR_INTERNAL_SERVER_ERROR = 500;
+export const COMPLUTE_STATUS = 'Complete';
 
 // CuraEngine binaries
 export const RESOURCES_DIR = '../resources';
 
-export const CURA_ENGINE_MACOS = `${RESOURCES_DIR}/CuraEngine/3.6/macOS/CuraEngine`;
-export const CURA_ENGINE_LINUX = `${RESOURCES_DIR}/CuraEngine/3.6/Linux/CuraEngine`;
-export const CURA_ENGINE_WIN64 = `${RESOURCES_DIR}/CuraEngine/3.6/Windows-x64/CuraEngine.exe`;
-
-
-export const WORKFLOW_STATE_PAUSED = 'paused';
-export const WORKFLOW_STATE_IDLE = 'idle';
 
 export const MACHINE_SERIES = {
     ORIGINAL: {
@@ -53,11 +57,6 @@ export const MACHINE_SERIES = {
                 y: 125,
                 z: 125
             },
-            laserSize: {
-                x: 125,
-                y: 125,
-                z: 125
-            }
         }
     },
     ORIGINAL_LZ: {
@@ -70,11 +69,6 @@ export const MACHINE_SERIES = {
                 y: 125,
                 z: 221
             },
-            laserSize: {
-                x: 125,
-                y: 125,
-                z: 221
-            }
         }
     },
     A150: {
@@ -86,11 +80,6 @@ export const MACHINE_SERIES = {
                 y: 160,
                 z: 145
             },
-            laserSize: {
-                x: 167,
-                y: 165,
-                z: 150
-            }
         },
         alias: ['SM2-S', 'Snapmaker 2.0 A150']
     },
@@ -103,11 +92,6 @@ export const MACHINE_SERIES = {
                 y: 250,
                 z: 235
             },
-            laserSize: {
-                x: 252,
-                y: 260,
-                z: 235
-            }
         },
         alias: ['SM2-M', 'Snapmaker 2.0 A250']
 
@@ -121,42 +105,54 @@ export const MACHINE_SERIES = {
                 y: 350,
                 z: 330
             },
-            laserSize: {
-                x: 345,
-                y: 357,
-                z: 334
-            }
         },
         alias: ['SM2-L', 'Snapmaker 2.0 A350']
     },
-    CUSTOM: {
-        value: 'Custom',
-        label: 'key-Luban/Machine/MachineSeries-Custom',
+    A400: {
+        value: 'A400',
+        label: 'key-Luban/Machine/MachineSeries-Snapmaker A400',
         setting: {
             size: {
-                x: 125,
-                y: 125,
-                z: 125
+                x: 400,
+                y: 400,
+                z: 400
             },
-            laserSize: {
-                x: 125,
-                y: 125,
-                z: 125
-            }
         },
-        alias: ['Custom']
-    }
+        alias: ['SM2-L', 'Snapmaker A400']
+    },
 };
 
-export const SINGLE_EXTRUDER_TOOLHEAD_FOR_ORIGINAL = 'singleExtruderToolheadForOriginal';
+export function findMachine(identifier) {
+    const availableMachines = [
+        SnapmakerOriginalMachine,
+        SnapmakerOriginalExtendedMachine,
+        SnapmakerA150Machine,
+        SnapmakerA250Machine,
+        SnapmakerA350Machine,
+        SnapmakerArtisanMachine,
+        SnapmakerJ1Machine,
+        SnapmakerRayMachine,
+    ];
+
+    for (const machine of availableMachines) {
+        if (machine.identifier === identifier) {
+            return machine;
+        }
+    }
+
+    return null;
+}
+
+// export const SINGLE_EXTRUDER_TOOLHEAD_FOR_ORIGINAL = 'singleExtruderToolheadForOriginal';
 export const SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2 = 'singleExtruderToolheadForSM2';
-export const DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 = 'dualExtruderToolheadForSM2';
-export const LEVEL_ONE_POWER_LASER_FOR_ORIGINAL = 'levelOneLaserToolheadForOriginal';
-export const LEVEL_TWO_POWER_LASER_FOR_ORIGINAL = 'levelTwoLaserToolheadForOriginal';
+// export const DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 = 'dualExtruderToolheadForSM2';
+// export const LEVEL_ONE_POWER_LASER_FOR_ORIGINAL = 'levelOneLaserToolheadForOriginal';
+// export const LEVEL_TWO_POWER_LASER_FOR_ORIGINAL = 'levelTwoLaserToolheadForOriginal';
 export const LEVEL_ONE_POWER_LASER_FOR_SM2 = 'levelOneLaserToolheadForSM2';
 export const LEVEL_TWO_POWER_LASER_FOR_SM2 = 'levelTwoLaserToolheadForSM2';
-export const STANDARD_CNC_TOOLHEAD_FOR_ORIGINAL = 'standardCNCToolheadForOriginal';
+// export const STANDARD_CNC_TOOLHEAD_FOR_ORIGINAL = 'standardCNCToolheadForOriginal';
 export const STANDARD_CNC_TOOLHEAD_FOR_SM2 = 'standardCNCToolheadForSM2';
+export const LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2 = 'levelTwoCNCToolheadForSM2';
 
 // 3D Mesh Convert 2D Image
 export const FRONT = 'front';
@@ -165,10 +161,6 @@ export const LEFT = 'left';
 export const RIGHT = 'right';
 export const TOP = 'top';
 export const BOTTOM = 'bottom';
-
-// Connection Type
-export const CONNECTION_TYPE_SERIAL = 'serial';
-export const CONNECTION_TYPE_WIFI = 'wifi';
 
 // Head Type
 export const HEAD_CNC = 'cnc';
@@ -216,3 +208,24 @@ export const DEFINITION_ACTIVE_FINAL = 'active_final';
 
 export const KEY_DEFAULT_CATEGORY_CUSTOM = 'key-default_category-Custom';
 export const KEY_DEFAULT_CATEGORY_DEFAULT = 'key-default_category-Default';
+
+export const PORT_SCREEN_HTTP = 8080;
+export const PORT_SCREEN_SACP = 8888;
+export const DEFAULT_BAUDRATE = 115200;
+
+export const PRINTING_MANAGER_TYPE_MATERIAL = 'material';
+export const PRINTING_MANAGER_TYPE_QUALITY = 'quality';
+export const MATERIAL_TYPE_ARRAY = [
+    'PLA',
+    'Support',
+    'ABS',
+    'PETG',
+    'TPE',
+    'TPU',
+    'PVA',
+    'ASA',
+    'PC',
+    'Nylon',
+    'Other'
+];
+

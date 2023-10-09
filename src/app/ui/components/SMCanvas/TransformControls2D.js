@@ -2,7 +2,7 @@ import {
     Vector3, Quaternion,
     Object3D, Raycaster
 } from 'three';
-import ThreeUtils from '../../../three-extensions/ThreeUtils';
+import ThreeUtils from '../../../scene/three-extensions/ThreeUtils';
 import { isZero } from '../../../../shared/lib/utils';
 import Peripheral from './Peripheral';
 import { SELECTEVENT } from '../../../constants';
@@ -115,18 +115,6 @@ class TransformControls2D extends Object3D {
     }
 
     // initFramePeripherals() {
-    //     // dashed line frame
-    //     const geometry = new Geometry();
-    //     // FIXME: preset vertices, or dynamic update will not work. (three.js bug?)
-    //     const points = [];
-    //     points.push(new Vector3(0, 0, 0));
-    //     points.push(new Vector3(0, 0, 0));
-    //     points.push(new Vector3(0, 0, 0));
-    //     points.push(new Vector3(0, 0, 0));
-    //     points.push(new Vector3(0, 0, 0));
-    //
-    //     geometry.vertices = points;
-    //
     //     const material = new LineDashedMaterial({
     //         color: BLUE,
     //         dashSize: 2,

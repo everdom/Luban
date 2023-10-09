@@ -10,11 +10,12 @@ export function appCopyDevelopment() {
     const files = [
         'src/app/*.{ico,png,html}',
         'src/app/resources/{images,textures}/**/*',
-        'src/app/resources/i18n/**/*'
+        'src/app/resources/i18n/**/*',
+        'src/app/resources/print-board/*'
     ];
 
     return gulp.src(files, { base: 'src/app' })
-        .pipe(gulp.dest('output/app'));
+        .pipe(gulp.dest('output/src/app'));
 }
 
 //
@@ -24,11 +25,12 @@ export function appCopyProduction() {
     const files = [
         'src/app/*.{ico,png,html}',
         'src/app/resources/{images,textures}/**/*',
-        'src/app/resources/i18n/**/*'
+        'src/app/resources/i18n/**/*',
+        'src/app/resources/print-board/*'
     ];
 
     return gulp.src(files, { base: 'src/app' })
-        .pipe(gulp.dest('dist/Luban/app'));
+        .pipe(gulp.dest('dist/Luban/src/app'));
 }
 
 

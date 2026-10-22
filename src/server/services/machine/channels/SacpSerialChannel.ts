@@ -58,16 +58,22 @@ class SacpSerialChannel extends SacpChannelBase {
             });
 
             // When serialport connected, we detect the machine identifier
-            this.serialport.once('open', () => {
+            this.serialport.once('open', async () => {
                 this.emit(ChannelEvent.Connected);
 
                 log.debug(`Serial port ${port} opened`);
 
                 // Force switch to SACP
                 this.serialport.write('\r\n');
+                await new Promise<void>((r) => setTimeout(() => r(), 100));
+
+                // for artisan
                 this.serialport.write('M2000 S5 P1\r\n');
-                // this.serialport.write('M2000 U5\r\n');
+                await new Promise<void>((r) => setTimeout(() => r(), 100));
+
+                // for ray
                 this.serialport.write('$PS\r\n');
+                await new Promise<void>((r) => setTimeout(() => r(), 100));
 
                 log.debug('M2000 sent');
 
@@ -110,8 +116,8 @@ class SacpSerialChannel extends SacpChannelBase {
         return super.startHeartbeat();
     }
 
-    public async stopHeartbeat(): Promise<void> {
-        return super.stopHeartbeat();
+    public async stopHeartbeat(id?: string): Promise<void> {
+        return super.stopHeartbeat(id);
     }
 
     public startGcode = async (options: EventOptions) => {

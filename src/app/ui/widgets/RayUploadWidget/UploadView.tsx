@@ -1,20 +1,21 @@
 import classNames from 'classnames';
+import { includes } from 'lodash';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { includes } from 'lodash';
 
 import { WorkflowStatus } from '@snapmaker/luban-platform';
-import { JobOffsetMode } from '../../../constants/coordinate';
-import SocketEvent from '../../../communication/socket-events';
-import { RootState } from '../../../flux/index.def';
 import controller from '../../../communication/socket-communication';
+import SocketEvent from '../../../communication/socket-events';
+import { JobOffsetMode } from '../../../constants/coordinate';
+import { RootState } from '../../../flux/index.def';
+import gcodeActions from '../../../flux/workspace/actions-gcode';
+import { GCodeFileMetadata } from '../../../flux/workspace/types';
 import i18n from '../../../lib/i18n';
 import log from '../../../lib/log';
 import { Button } from '../../components/Buttons';
 import modalSmallHOC, { ModalSmallHOC } from '../../components/Modal/modal-small';
-import gcodeActions, { GCodeFileObject } from '../../../flux/workspace/actions-gcode';
+import { getRunBoundaryCode } from '../RaySetOriginWidget/SetOriginView';
 import styles from './styles.styl';
-import { getRunBoundayCode } from '../RaySetOriginWidget/SetOriginView';
 
 export type LoadGcodeOptions = {
     renderImmediately?: boolean;
@@ -29,6 +30,7 @@ enum UploadFileModalType {
 
 const UploadView: React.FC = () => {
     const isConnected = useSelector((state: RootState) => state.workspace.isConnected);
+    const setupCoordinateMethod = useSelector((state: RootState) => state.workspace.setupCoordinateMethod);
 
     const workflowStatus = useSelector((state: RootState) => state.workspace.workflowStatus);
     // const activeGcodeFile = useSelector((state: RootState) => state.workspace.activeGcodeFile);
@@ -37,7 +39,6 @@ const UploadView: React.FC = () => {
         WorkflowStatus.Running, WorkflowStatus.Pausing, WorkflowStatus.Paused, WorkflowStatus.Stopping, WorkflowStatus.Resuming
     ], workflowStatus);
 
-    const boundingBox = useSelector((state: RootState) => state.workspace.boundingBox);
     const jobOffsetMode: JobOffsetMode = useSelector((state: RootState) => state.laser.jobOffsetMode);
 
     const gcodeFile = useSelector((state: RootState) => state.workspace.gcodeFile);
@@ -98,18 +99,18 @@ const UploadView: React.FC = () => {
     const dispatch = useDispatch();
 
     const uploadBoundary = useCallback(async () => {
-        if (!boundingBox) {
+        if (!gcodeFile) {
             return false;
         }
 
-        log.info('Run Boundary... bbox =', boundingBox);
+        log.info('Run Boundary... bbox =', gcodeFile.gcodeAxisWorkRange);
 
-        const gcode = getRunBoundayCode(boundingBox, jobOffsetMode);
+        const gcode = getRunBoundaryCode(gcodeFile.gcodeAxisWorkRange, jobOffsetMode, gcodeFile.is_rotate, setupCoordinateMethod);
 
         const blob = new Blob([gcode], { type: 'text/plain' });
         const file = new File([blob], 'boundary.nc');
 
-        const gcodeFileObject: GCodeFileObject = await dispatch(gcodeActions.uploadGcodeFile(file));
+        const gcodeFileObject: GCodeFileMetadata = await dispatch(gcodeActions.uploadGcodeFile(file));
 
         return new Promise<boolean>((resolve) => {
             controller
@@ -122,6 +123,12 @@ const UploadView: React.FC = () => {
                         log.error('Unable to upload G-code to execute.');
                         log.error(err);
                         log.error(`Reason: ${text}`);
+                        modalSmallHOC({
+                            title: i18n._('key-Workspace/WifiTransport-Failed to send file.'),
+                            text: text,
+                            iconColor: '#FF4D4F',
+                            img: 'WarningTipsError'
+                        });
                         resolve(false);
                         return;
                     }
@@ -130,13 +137,9 @@ const UploadView: React.FC = () => {
                     resolve(true);
                 });
         });
-    }, [dispatch, boundingBox, jobOffsetMode]);
+    }, [dispatch, gcodeFile, jobOffsetMode, setupCoordinateMethod]);
 
     const uploadJob = useCallback(async () => {
-        if (!gcodeFile) {
-            return false;
-        }
-
         setIsUploading(true);
 
         return new Promise<boolean>((resolve) => {
@@ -166,7 +169,7 @@ const UploadView: React.FC = () => {
                     } else {
                         modalSmallHOC({
                             title: i18n._('key-Workspace/WifiTransport-File sent successfully.'),
-                            text: i18n._('File was successfully sent. Please long press the button on the machine to start the job. If the enclosure is installed, the enclosure door needs to be closed.'),
+                            text: i18n._('File sent successfully. Press and hold the work switch on the integrated controller (for about 3 seconds) until the machine starts the task.'),
                             iconColor: '#4CB518',
                             img: 'WarningTipsSuccess'
                         });
@@ -179,12 +182,6 @@ const UploadView: React.FC = () => {
     const onClickUploadJob = useCallback(async () => {
         const success = await uploadBoundary();
         if (!success) {
-            modalSmallHOC({
-                title: i18n._('key-Workspace/WifiTransport-Failed to send file.'),
-                text: i18n._('key-Workspace/WifiTransport-Failed to send file.'),
-                iconColor: '#FF4D4F',
-                img: 'WarningTipsError'
-            });
             return;
         }
 
@@ -198,7 +195,7 @@ const UploadView: React.FC = () => {
                     type="primary"
                     priority="level-one"
                     onClick={onClickUploadJob}
-                    disabled={!isConnected || isWorking}
+                    disabled={!isConnected || isWorking || !gcodeFile}
                 >
                     {i18n._('key-Workspace/Upload Job')}
                 </Button>

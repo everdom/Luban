@@ -9,7 +9,7 @@ import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import { useHistory } from 'react-router-dom';
 
 import { CNC_GCODE_SUFFIX, LASER_GCODE_SUFFIX, PRINTING_GCODE_SUFFIX } from '../../constants';
-import { DUAL_EXTRUDER_TOOLHEAD_FOR_SM2, MACHINE_SERIES } from '../../constants/machines';
+import { DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN, DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 } from '../../constants/machines';
 import { RootState } from '../../flux/index.def';
 import { actions as widgetActions } from '../../flux/widget';
 import { actions as workspaceActions } from '../../flux/workspace';
@@ -45,6 +45,7 @@ import {
     SnapmakerA250Machine,
     SnapmakerA350Machine,
     SnapmakerArtisanMachine,
+    SnapmakerJ1Machine,
 } from '../../machines';
 
 
@@ -84,12 +85,12 @@ function getUnsupportedWidgets(machineIdentifier, toolHead) {
     if (!machineIdentifier) return [];
 
     if ([SnapmakerA150Machine.identifier, SnapmakerA250Machine.identifier, SnapmakerA350Machine.identifier].includes(machineIdentifier)) {
-        if (toolHead === DUAL_EXTRUDER_TOOLHEAD_FOR_SM2) {
+        if (toolHead === DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 || toolHead === DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN) {
             return [];
         }
     }
 
-    if (machineIdentifier === MACHINE_SERIES.J1.identifier) {
+    if (machineIdentifier === SnapmakerJ1Machine.identifier) {
         // G-code execution need firmware upgrades
         // Unsupported widgets: console, control, macro (v4.8)
         return ['control', 'macro'];

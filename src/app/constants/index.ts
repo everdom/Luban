@@ -716,7 +716,7 @@ export const LASER_DEFAULT_GCODE_PARAMETERS_DEFINITION = {
     },
     auxiliaryAirPump: {
         default_value: false,
-        label: 'Auxiliary Air Pump',
+        label: 'Air Assist Pump',
         description: 'It can effectively increase the air flow rate over the laser focus point to achieve better cutting results.However, it may give worse results for non-cutting conditions.',
         type: 'bool',
     },
@@ -732,6 +732,29 @@ export const LASER_DEFAULT_GCODE_PARAMETERS_DEFINITION = {
         description: 'In constant power mode, the laser does not change with speed and is recommended to be turned on when cutting. And it is recommended to turn it off when picture engraving.',
         type: 'bool'
     },
+    dotWithCompensation: {
+        default_value: 0,
+        label: 'Dot width compensation',
+        description: 'It is used to compensate for deviations caused by the laser spot. It prevents excessive burning in image engraving situations. In the case of cutting, it guarantees more precise dimensions.',
+        type: 'float',
+        unit: 'mm'
+    },
+    scanningPreAccelRatio: {
+        default_value: 0,
+        label: 'Over Scanning',
+        min: 0,
+        max: 100,
+        unit: '%',
+        description: 'Over Scanning allows the true operating speed to be as close as possible to the target speed, but with a certain loss of machining travel. This value represents the percentage of the desired speed that will reach the target speed.',
+        type: 'float',
+    },
+    scanningOffset: {
+        default_value: 0,
+        label: 'Scan Offset',
+        unit: 'mm',
+        type: 'float',
+        description: 'Used for bi-directional filler engraving, it compensates for positioning deviations due to machine backlash.'
+    },
     movementMode: {
         label: 'Movement Mode',
         description: 'Set whether the object is filled with lines or dots.',
@@ -745,9 +768,9 @@ export const LASER_DEFAULT_GCODE_PARAMETERS_DEFINITION = {
     fillInterval: {
         label: 'Fill Interval',
         description:
-            'Set the degree to which an area is filled with laser lines or dots. The minimal interval is 0.05 mm.',
+            'Set the degree to which an area is filled with laser lines or dots. The minimal interval is 0.01 mm.',
         type: 'float',
-        min: 0.05,
+        min: 0.01,
         // max: 1,
         step: 0.01,
         default_value: 0.25,
@@ -1159,3 +1182,20 @@ export const MANUAL_MODE = Symbol('manual mode');
 export const AUTO_STRING = 'auto';
 
 
+export enum MotorPowerMode {
+    GETCURRENTMODE, SHUTAll, ONLYLINEAR, STAYPOWER
+}
+
+export enum SetupCoordinateMethod {
+    // Move tool manually
+    Manually = 'manually',
+
+    // Move tool using control panel
+    ByControlPanel = 'control-panel',
+}
+
+// ABPosition
+export const ABPositionOverlayID = 'ABposition-background-overlay';
+export const ABpositionMaskID = 'ABposition-mask';
+export const PointAID = 'ABposition-point-A';
+export const PointBID = 'ABposition-point-B';

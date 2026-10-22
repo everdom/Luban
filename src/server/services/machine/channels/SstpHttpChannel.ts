@@ -1,9 +1,9 @@
-import { isEqual, isNil } from 'lodash';
+import { includes, isEqual, isNil } from 'lodash';
 import request from 'superagent';
 
 import SocketEvent from '../../../../app/communication/socket-events';
 import { DUAL_EXTRUDER_TOOLHEAD_FOR_SM2, } from '../../../../app/constants/machines';
-import { L20WLaserToolModule, L40WLaserToolModule } from '../../../../app/machines/snapmaker-2-toolheads';
+import { L20WLaserToolModule, L2WLaserToolModule, L40WLaserToolModule, highPower200WCNCToolHead } from '../../../../app/machines/snapmaker-2-toolheads';
 import {
     HEAD_CNC,
     HEAD_LASER,
@@ -17,7 +17,7 @@ import {
 import logger from '../../../lib/logger';
 import workerManager from '../../task-manager/workerManager';
 import { ConnectionType, EventOptions } from '../types';
-import Channel, { CncChannelInterface, FileChannelInterface, UploadFileOptions } from './Channel';
+import Channel, { CncChannelInterface, ExecuteGcodeResult, FileChannelInterface, LaserChannelInterface, UploadFileOptions } from './Channel';
 import { ChannelEvent } from './ChannelEvent';
 
 let waitConfirm: boolean;
@@ -88,7 +88,8 @@ const _getResult = (err, res: request.Response): Result => {
     };
 };
 // let timeoutHandle = null;
-let intervalHandle = null;
+const intervalHandle = null;
+
 
 export type StateOptions = {
     headType?: string,
@@ -103,9 +104,14 @@ export type GcodeResult = {
     code?: number;
 };
 
+
+interface GCodeQueueItemResponse {
+    result: number;
+    text: string;
+}
 interface GCodeQueueItem {
     gcodes: string[];
-    callback: () => void;
+    callback: (res: GCodeQueueItemResponse) => void;
 }
 
 /**
@@ -113,6 +119,7 @@ interface GCodeQueueItem {
  */
 class SstpHttpChannel extends Channel implements
     FileChannelInterface,
+    LaserChannelInterface,
     CncChannelInterface {
     private isGcodeExecuting = false;
 
@@ -129,6 +136,13 @@ class SstpHttpChannel extends Channel implements
     private moduleSettings = null;
 
     private getLaserMaterialThicknessReq = null;
+
+    private intervalRefMap = new Map();
+
+    private clearAllInterval() {
+        Array.from(this.intervalRefMap.values())
+            .forEach(intervalRef => clearInterval(intervalRef));
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     public onConnection = () => {
@@ -219,12 +233,21 @@ class SstpHttpChannel extends Channel implements
                             headType = HEAD_LASER;
                             toolHead = L40WLaserToolModule.identifier;
                             break;
+                        case 8:
+                            headType = HEAD_CNC;
+                            toolHead = highPower200WCNCToolHead.identifier;
+                            break;
+                        case 9:
+                            headType = HEAD_LASER;
+                            toolHead = L2WLaserToolModule.identifier;
+                            break;
                         default:
                             headType = HEAD_PRINTING;
                             toolHead = undefined;
                     }
                     this.state.headType = headType;
                     this.state.toolHead = toolHead;
+
                     if (!(this.state.series && headType && headType !== 'UNKNOWN')) {
                         this.socket && this.socket.emit('connection:open', {
                             msg: 'key-Workspace/Connection-The machine or toolhead cannot be correctly recognized. Make sure the firmware is up to date and the machine is wired correctly.',
@@ -234,12 +257,16 @@ class SstpHttpChannel extends Channel implements
                         this.socket && this.socket.emit('connection:open', result);
                     }
 
-                    // Get module info
+                    // Get module list(only status)
                     this.getModuleList();
 
                     // Get enclosure status (every 1000ms)
-                    clearInterval(intervalHandle);
-                    intervalHandle = setInterval(this.getEnclosureStatus, 1000);
+                    clearInterval(this.intervalRefMap.get('getEnclosureStatus'));
+                    this.intervalRefMap.set('getEnclosureStatus', setInterval(this.getEnclosureStatus, 1000));
+
+                    // Get module info(include data) every 1000ms
+                    clearInterval(this.intervalRefMap.get('getModuleInfo'));
+                    this.intervalRefMap.set('getModuleInfo', setInterval(this.getModuleInfo, 1000));
 
                     // Get Active extruder
                     this.getActiveExtruder({ eventName: 'connection:getActiveExtruder' });
@@ -256,7 +283,7 @@ class SstpHttpChannel extends Channel implements
 
     public async connectionClose(options: { force: boolean }): Promise<boolean> {
         // TODO: cancel intervals on instance
-        clearInterval(intervalHandle);
+        this.clearAllInterval();
         this.stopHeartBeat();
 
         const force = options?.force || false;
@@ -294,7 +321,7 @@ class SstpHttpChannel extends Channel implements
         }], (result: object) => {
             if (result.status === 'offline') {
                 log.info(`[wifi connection offline]: msg=${result.msg}`);
-                clearInterval(intervalHandle);
+                this.clearAllInterval();
                 this.socket && this.socket.emit('connection:close');
                 return;
             }
@@ -365,8 +392,12 @@ class SstpHttpChannel extends Channel implements
                 .send(`code=${gcode}`)
                 // .send(formData)
                 .end((err, res) => {
-                    const { data, text } = _getResult(err, res);
-                    resolve({ data, text });
+                    const { code, data, text } = _getResult(err, res);
+                    if (err) {
+                        resolve({ code });
+                    } else {
+                        resolve({ data, text });
+                    }
                 });
         });
     };
@@ -380,15 +411,18 @@ class SstpHttpChannel extends Channel implements
         // drain G-code queue
         while (this.gcodeQueue.length > 0) {
             const splice = this.gcodeQueue.splice(0, 1)[0];
-            const result = [];
+            const results = [];
             for (const code of splice.gcodes) {
                 const { text } = await this._executeGcode(code) as GcodeResult;
                 if (text) {
-                    result.push(text);
+                    results.push(text);
                 }
             }
 
-            splice.callback && splice.callback();
+            splice.callback && splice.callback({
+                result: 0,
+                text: results.join('\n'),
+            });
         }
 
         this.isGcodeExecuting = false;
@@ -397,14 +431,23 @@ class SstpHttpChannel extends Channel implements
     /**
      * Generic execute G-code commands.
      */
-    public async executeGcode(gcode: string): Promise<boolean> {
+    public async executeGcode(gcode: string): Promise<ExecuteGcodeResult> {
         return new Promise((resolve) => {
             // enqueue G-code execution
             const split = gcode.split('\n');
             this.gcodeQueue.push({
                 gcodes: split,
-                callback: () => {
-                    resolve(true);
+                callback: ({ result, text }) => {
+                    if (result === 0) {
+                        resolve({
+                            result: 0,
+                            text,
+                        });
+                    } else {
+                        resolve({
+                            result: -1,
+                        });
+                    }
                 }
             });
 
@@ -437,30 +480,82 @@ class SstpHttpChannel extends Channel implements
         return false;
     }
 
+    // interface: LaserChannelInterface
+
+    public async turnOnTestLaser(): Promise<boolean> {
+        if (includes([L20WLaserToolModule.identifier, L40WLaserToolModule.identifier], this.state.toolHead)) {
+            const executeResult = await this.executeGcode('M3 P0.2');
+            return executeResult.result === 0;
+        } else {
+            const executeResult = await this.executeGcode('M3 P1 S2.55');
+            return executeResult.result === 0;
+        }
+    }
+
+    public async turnOnCrosshair(): Promise<boolean> {
+        const executeResult = await this.executeGcode('M2002 T3 P1');
+        return (executeResult.result === 0);
+    }
+
+    public async turnOffCrosshair(): Promise<boolean> {
+        const executeResult = await this.executeGcode('M2002 T3 P0');
+        return (executeResult.result === 0);
+    }
+
+    public async getCrosshairOffset(): Promise<{ x: number; y: number; }> {
+        return { x: 0, y: 0 };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public async setCrosshairOffset(x: number, y: number): Promise<boolean> {
+        return false;
+    }
+
+    public async getFireSensorSensitivity(): Promise<number> {
+        return 0;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public async setFireSensorSensitivity(sensitivity: number): Promise<boolean> {
+        return false;
+    }
+
     // interface: CncChannelInterface
 
     public async setSpindleSpeed(speed: number): Promise<boolean> {
         // on and off to set speed
-        if (await this.executeGcode(`M3 S${speed}`)) return false;
-        if (await this.executeGcode('M5')) return false;
+        let executeResult: ExecuteGcodeResult = null;
+
+        executeResult = await this.executeGcode(`M3 S${speed} C`);
+        if (executeResult.result !== 0) return false;
+
+        // executeResult = await this.executeGcode('M5');
+        // if (executeResult.result !== 0) return false;
 
         return true;
     }
 
     public async setSpindleSpeedPercentage(percent: number): Promise<boolean> {
         // on and off to set speed
-        if (await this.executeGcode(`M3 P${percent}`)) return false;
-        if (await this.executeGcode('M5')) return false;
+        let executeResult: ExecuteGcodeResult = null;
+
+        executeResult = await this.executeGcode(`M3 P${percent}`);
+        if (executeResult.result !== 0) return false;
+
+        executeResult = await this.executeGcode('M5');
+        if (executeResult.result !== 0) return false;
 
         return true;
     }
 
     public async spindleOn(): Promise<boolean> {
-        return this.executeGcode('M3');
+        const executeResult = await this.executeGcode('M3');
+        return executeResult.result === 0;
     }
 
     public async spindleOff(): Promise<boolean> {
-        return this.executeGcode('M5');
+        const executeResult = await this.executeGcode('M5');
+        return executeResult.result === 0;
     }
 
     /**
@@ -478,6 +573,24 @@ class SstpHttpChannel extends Channel implements
                 if (!err) {
                     this.socket && this.socket.emit('machine:module-list', {
                         moduleList: data.moduleList || [],
+                    });
+                }
+            });
+    };
+
+    /**
+     * Get module info.
+     */
+    public getModuleInfo = () => {
+        request
+            .get(`${this.host}/api/v1/module_info?token=${this.token}`)
+            .timeout(1000)
+            .end((err, res) => {
+                const result = _getResult(err, res);
+                const data = result?.data;
+                if (!err) {
+                    this.socket && this.socket.emit('machine:module-info', {
+                        moduleInfo: data.moduleInfo || [],
                     });
                 }
             });

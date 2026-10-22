@@ -39,7 +39,7 @@ import {
     RIGHT_EXTRUDER_MAP_NUMBER,
     WHITE_COLOR
 } from '../../constants';
-import { getMachineToolHeadConfigPath, isDualExtruder } from '../../constants/machines';
+import { findToolHead, getMachineToolHeadConfigPath, isDualExtruder } from '../../constants/machines';
 import { isQualityPresetVisible, PRESET_CATEGORY_CUSTOM } from '../../constants/preset';
 
 import { controller } from '../../communication/socket-communication';
@@ -265,7 +265,6 @@ const INITIAL_STATE = {
     hasModel: false,
     isAnyModelOverstepped: false,
     // model: null, // selected model
-    // boundingBox: new THREE.Box3(new THREE.Vector3(), new THREE.Vector3()), // bbox of selected model
     stopArea: {
         left: 0,
         right: 0,
@@ -360,7 +359,9 @@ const ACTION_UPDATE_TRANSFORMATION = 'printing/ACTION_UPDATE_TRANSFORMATION';
 
 const createLoadModelWorker = (uploadPath, onMessage) => {
     const task = {
-        worker: workerManager.loadModel(uploadPath, data => {
+        worker: workerManager.loadModel({
+            filePath: uploadPath
+        }, (data) => {
             for (const fn of task.cbOnMessage) {
                 if (typeof fn === 'function') {
                     fn(data);
@@ -709,11 +710,13 @@ export const actions = {
      *
      * Considering:
      *  - machine size
+     *  - toolhead affset, just x, y
      *  - print mode (different edit areas for specific print modes)
      *  - adhesion parameters (reducing edit area)
      */
     updateBoundingBox: () => (dispatch, getState) => {
         const modules = getState().machine.modules as string[];
+        const toolHead = getState().machine.toolHead;
 
         const modelGroup: ModelGroup = getState().printing.modelGroup;
         const {
@@ -769,6 +772,18 @@ export const actions = {
                     workRange.max.x += machineModuleOptions.workRangeOffset[0];
                     workRange.max.y += machineModuleOptions.workRangeOffset[1];
                     workRange.max.z += machineModuleOptions.workRangeOffset[2];
+                }
+            }
+        }
+
+        // Check work range offsets from machine toolhead(x, y)
+        for (const machineToolheadOptions of activeMachine.metadata?.toolHeads || []) {
+            const identifier = machineToolheadOptions.identifier;
+            const machineSize = activeMachine.metadata.size;
+            if (toolHead.printingToolhead === identifier) {
+                if (machineToolheadOptions?.workRange) {
+                    workRange.max.x += machineToolheadOptions.workRange.max[0] - machineSize.x;
+                    workRange.max.y += machineToolheadOptions.workRange.max[1] - machineSize.y;
                 }
             }
         }
@@ -3504,13 +3519,14 @@ export const actions = {
             logTransformOperation(HEAD_PRINTING, transformMode, axis);
         }
         const { targetTmpState } = getState().printing;
-        let operations, operation;
+        let compoundOperation: CompoundOperation;
+        let operation;
         if (combinedOperations) {
-            operations = combinedOperations;
+            compoundOperation = combinedOperations;
         } else {
-            operations = new CompoundOperation();
+            compoundOperation = new CompoundOperation();
             if (transformMode === 'rotate') {
-                dispatch(actions.clearAllManualSupport(operations));
+                dispatch(actions.clearAllManualSupport(compoundOperation));
             }
         }
 
@@ -3536,8 +3552,9 @@ export const actions = {
                 && model.isModelInGroup()
                 && Math.abs(targetTmpState[model.modelID].from.positionZ - targetTmpState[model.modelID].to.positionZ) > EPSILON
             ) {
-                dispatch(actions.clearSupportInGroup(operations, model));
+                dispatch(actions.clearSupportInGroup(compoundOperation, model));
             }
+
             switch (transformMode) {
                 case 'translate':
                     operation = new MoveOperation3D({
@@ -3565,24 +3582,26 @@ export const actions = {
                 default:
                     break;
             }
-            operations.push(operation);
+
+            if (operation) {
+                compoundOperation.push(operation);
+            }
         }
 
         if (transformMode === 'scale' && isMirror) {
-            dispatch(actions.clearAllManualSupport(operations));
+            dispatch(actions.clearAllManualSupport(compoundOperation));
         }
 
-        operations.registerCallbackAll(() => {
-            dispatch(actions.updateState(modelGroup.getState()));
-            dispatch(actions.destroyGcodeLine());
-            dispatch(actions.displayModel());
-            dispatch(actions.render());
+        compoundOperation.registerCallbackAll(() => {
+            dispatch(baseActions.updateState(modelGroup.getState()));
+            dispatch(sceneActions.discardPreview({ render: true }));
         });
         recovery();
+
         dispatch(
             operationHistoryActions.setOperations(
                 INITIAL_STATE.name,
-                operations
+                compoundOperation
             )
         );
     },
@@ -4099,7 +4118,7 @@ export const actions = {
             dispatch(actions.gcodeRenderingCallback(data, extruderColors));
         });
     },
-    clearAllManualSupport: combinedOperations => (dispatch, getState) => {
+    clearAllManualSupport: (combinedOperations = null) => (dispatch, getState) => {
         dispatch(actions.exitPreview());
 
         const { modelGroup } = getState().printing;
@@ -4186,10 +4205,19 @@ export const actions = {
         const progressStatesManager = getState().printing.progressStatesManager as ProgressStatesManager;
         const { modelGroup } = getState().printing;
         const { promptDamageModel } = getState().machine;
+        const toolHead = getState().machine.toolHead;
+        const toolHeadIdentifier: string = toolHead.printingToolhead;
+
+        const tool = findToolHead(toolHeadIdentifier);
 
         const models = [...modelGroup.models];
         const meshFileInfos: MeshFileInfo[] = files || [{ originalName, uploadName, isGroup, parentUploadName, modelID, children }];
         // let _progress = 0;
+
+        // Modifying the scale will persist in the model file, eliminating the need to include it here.
+        transformation.scaleX = 1;
+        transformation.scaleY = 1;
+        transformation.scaleZ = 1;
 
         const loadMeshFileOptions: LoadMeshFileOptions = {
             headType,
@@ -4207,6 +4235,8 @@ export const actions = {
             primeTowerTag,
             extruderConfig,
 
+            monoColor: tool.metadata.numberOfExtruders === 1,
+
             onProgress: (progress) => {
                 dispatch(
                     baseActions.updateState({
@@ -4216,7 +4246,6 @@ export const actions = {
                 );
             },
         };
-
 
         const loadMeshResult = await loadMeshFiles(meshFileInfos, modelGroup, loadMeshFileOptions);
         const { promptTasks } = loadMeshResult;
@@ -4545,7 +4574,7 @@ export const actions = {
                         })
                     );
                 })
-                .catch(log.error);
+                .catch(err => log.error(err));
         };
     },
 

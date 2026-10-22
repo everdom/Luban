@@ -1,31 +1,35 @@
+import { includes } from 'lodash';
 import { MarlinController } from '../../../controllers';
 import { PROTOCOL_TEXT, WRITE_SOURCE_CLIENT } from '../../../controllers/constants';
 import type SocketServer from '../../../lib/SocketManager';
 import logger from '../../../lib/logger';
-import store from '../../../store';
-import Channel, { CncChannelInterface } from './Channel';
+import Channel, { CncChannelInterface, ExecuteGcodeResult, LaserChannelInterface } from './Channel';
 import { ChannelEvent } from './ChannelEvent';
+import { L20WLaserToolModule, L40WLaserToolModule } from '../../../../app/machines/snapmaker-2-toolheads';
+import { HEAD_LASER } from '../../../constants';
 
 const log = logger('machine:channels:TextSerialChannel');
 
 const DEFAULT_BAUDRATE = 115200;
 class TextSerialChannel extends Channel implements
+    LaserChannelInterface,
     CncChannelInterface {
     private port = '';
 
     private dataSource = '';
 
+    private controller: MarlinController = null;
+
+    public getController(): MarlinController {
+        return this.controller;
+    }
 
     public onDisconnection = (socket: SocketServer) => {
-        const controllers = store.get('controllers', {});
-        Object.keys(controllers).forEach((port) => {
-            log.debug(`port, ${port}`);
-            const controller = controllers[port];
-            if (!controller) {
-                return;
-            }
-            controller.removeConnection(socket);
-        });
+        const controller = this.controller;
+        if (!controller) {
+            return;
+        }
+        controller.removeConnection(socket);
     };
 
     public async connectionOpen(options): Promise<boolean> {
@@ -34,7 +38,7 @@ class TextSerialChannel extends Channel implements
         this.port = port;
         this.dataSource = PROTOCOL_TEXT;
 
-        let controller = store.get(`controllers["${port}/${this.dataSource}"]`);
+        let controller = this.controller;
         if (!controller) {
             controller = new MarlinController({
                 port,
@@ -76,7 +80,7 @@ class TextSerialChannel extends Channel implements
                         return;
                     }
 
-                    store.set(`controllers["${port}/${this.dataSource}"]`, controller);
+                    this.controller = controller;
 
                     this.emit(ChannelEvent.Connected);
 
@@ -87,47 +91,96 @@ class TextSerialChannel extends Channel implements
     }
 
     public async connectionClose(): Promise<boolean> {
-        const port = this.port;
-        const dataSource = this.dataSource;
-
-        const controller = store.get(`controllers["${port}/${dataSource}"]`);
+        const controller = this.controller;
         if (!controller) {
             return false;
         }
 
+        if (controller.state.headType === HEAD_LASER) {
+            controller.writeln('M5');
+        }
+
         return new Promise((resolve) => {
-            controller.close(() => {
-                // Remove controller from store
-                store.unset(`controllers["${port}/${dataSource}"]`);
+            controller.close();
 
-                // Destroy controller
-                controller.destroy();
+            // Remove controller
+            this.controller = null;
 
-                resolve(true);
-            });
+            // Destroy controller
+            controller.destroy();
+
+            resolve(true);
         });
     }
 
-    public async executeGcode(gcode: string): Promise<boolean> {
+    public async executeGcode(gcode: string): Promise<ExecuteGcodeResult> {
         const gcodeLines = gcode.split('\n');
 
-        const port = this.port;
-        const dataSource = this.dataSource;
-        const controller = store.get(`controllers["${port}/${dataSource}"]`);
+        const controller = this.controller;
         controller.command(null, 'gcode', gcodeLines);
-        return true;
+
+        return {
+            result: 0,
+            text: 'ok',
+        };
+    }
+
+    // interface: LaserChannelInterface
+
+    public async turnOnTestLaser(): Promise<boolean> {
+        const controller = this.getController();
+        const state = controller.controller.state;
+
+        const toolHead = state?.toolHead;
+        if (toolHead && includes([L20WLaserToolModule.identifier, L40WLaserToolModule.identifier], toolHead)) {
+            const executeResult = await this.executeGcode('M3 P0.2');
+            return executeResult.result === 0;
+        } else {
+            // Can't detect tool head identifier by now, use 1% temporarily
+            const executeResult = await this.executeGcode('M3 P1 S2.55');
+            return executeResult.result === 0;
+        }
+    }
+
+    public async turnOnCrosshair(): Promise<boolean> {
+        return false;
+    }
+
+    public async turnOffCrosshair(): Promise<boolean> {
+        return false;
+    }
+
+    public async getCrosshairOffset(): Promise<{ x: number; y: number; }> {
+        return { x: 0, y: 0 };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public async setCrosshairOffset(x: number, y: number): Promise<boolean> {
+        return false;
+    }
+
+    public async getFireSensorSensitivity(): Promise<number> {
+        return 0;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public async setFireSensorSensitivity(sensitivity: number): Promise<boolean> {
+        return false;
     }
 
     // interface: CncChannelInterface
 
     public async setSpindleSpeed(speed: number): Promise<boolean> {
+        console.log('set speed', speed);
         // on and off to set speed
         const gcode = [
-            `M3 S${speed}`,
-            'M5',
+            `M3 S${speed} C`,
+            // `M3 S${speed}`,
+            // 'M5',
         ].join('\n');
 
-        return this.executeGcode(gcode);
+        const { result } = await this.executeGcode(gcode);
+        return result === 0;
     }
 
     public async setSpindleSpeedPercentage(percent: number): Promise<boolean> {
@@ -137,15 +190,18 @@ class TextSerialChannel extends Channel implements
             'M5',
         ].join('\n');
 
-        return this.executeGcode(gcode);
+        const { result } = await this.executeGcode(gcode);
+        return result === 0;
     }
 
     public async spindleOn(): Promise<boolean> {
-        return this.executeGcode('M3');
+        const { result } = await this.executeGcode('M3');
+        return result === 0;
     }
 
     public async spindleOff(): Promise<boolean> {
-        return this.executeGcode('M5');
+        const { result } = await this.executeGcode('M5');
+        return result === 0;
     }
 
     /**
@@ -160,10 +216,9 @@ class TextSerialChannel extends Channel implements
     public command = (socket: SocketServer, options) => {
         const { cmd = 'gcode', args = [] } = options;
         const port = this.port;
-        const dataSource = this.dataSource;
         log.debug(`socket.command("${port}", "${cmd}"): id=${socket.id}, args=${JSON.stringify(args)}`);
 
-        const controller = store.get(`controllers["${port}/${dataSource}"]`);
+        const controller = this.controller;
         if (!controller || !controller.isOpen()) {
             log.error(`Serial port "${port}" not accessible`);
             return;
@@ -174,12 +229,11 @@ class TextSerialChannel extends Channel implements
 
     public writeln = (socket: SocketServer, options) => {
         const port = this.port;
-        const dataSource = this.dataSource;
         const { data, context = {} } = options;
 
         log.debug(`socket.writeln("${port}", "${data}", ${JSON.stringify(context)}): id=${socket.id}`);
 
-        const controller = store.get(`controllers["${port}/${dataSource}"]`);
+        const controller = this.controller;
         if (!controller || !controller.isOpen()) {
             log.error(`Serial port "${port}" not accessible`);
             return;

@@ -1,9 +1,15 @@
 import { PeerId } from '@snapmaker/snapmaker-sacp-sdk/dist/communication/Header';
-import { includes } from 'lodash';
+import { includes, isNil } from 'lodash';
 
+import { v4 as uuidv4 } from 'uuid';
+import { gt } from 'semver';
 import {
+    AIR_PURIFIER_MODULE_IDS,
+    EMERGENCY_STOP_BUTTON,
+    ENCLOSURE_MODULE_IDS,
     LASER_HEAD_MODULE_IDS,
     MODULEID_TOOLHEAD_MAP,
+    ROTARY_MODULE_IDS,
 } from '../../../../app/constants/machines';
 import { SnapmakerRayMachine } from '../../../../app/machines';
 import { HEAD_LASER } from '../../../constants';
@@ -20,6 +26,8 @@ const log = logger('services:machine:instances:RayInstance');
 
 
 class RayMachineInstance extends MachineInstance {
+    public id = uuidv4()
+
     private async _prepareMachineSACP() {
         // configure channel
         (this.channel as SacpChannelBase).setFilePeerId(PeerId.CONTROLLER);
@@ -39,7 +47,7 @@ class RayMachineInstance extends MachineInstance {
         const moduleInfos = await (this.channel as SacpChannelBase).getModuleInfo();
 
         /*
-        moduleInfos = [
+        e.g. moduleInfos = [
           ModuleInfo {
             key: 3,
             moduleId: 520,
@@ -52,11 +60,10 @@ class RayMachineInstance extends MachineInstance {
           },
         ]
         */
-
         const moduleListStatus = {
-            // airPurifier: false,
+            airPurifier: false,
             emergencyStopButton: false,
-            // enclosure: false,
+            enclosure: false,
             rotaryModule: false
         };
 
@@ -65,16 +72,50 @@ class RayMachineInstance extends MachineInstance {
                 state.headType = HEAD_LASER;
                 state.toolHead = MODULEID_TOOLHEAD_MAP[module.moduleId];
             }
+
+            if (includes(ROTARY_MODULE_IDS, module.moduleId)) {
+                moduleListStatus.rotaryModule = true;
+            }
+            if (includes(EMERGENCY_STOP_BUTTON, module.moduleId)) {
+                moduleListStatus.emergencyStopButton = true;
+            }
+            if (includes(AIR_PURIFIER_MODULE_IDS, module.moduleId)) {
+                moduleListStatus.airPurifier = true;
+            }
+            if (includes(ENCLOSURE_MODULE_IDS, module.moduleId)) {
+                moduleListStatus.enclosure = true;
+            }
         });
         state.moduleStatusList = moduleListStatus;
 
+
+
+        const isNewVersion = !isNil(machineInfo?.masterControlFirmwareVersion) && gt(machineInfo?.masterControlFirmwareVersion?.slice(1), '1.6.8');
+        state.isRayNewVersion = isNewVersion;
+        log.info('connected Ray with version: ', machineInfo?.masterControlFirmwareVersion);
+
+        //
+        // Get Coordinate Info
+        if (isNewVersion) {
+            const { data: coordinateInfos } = await (this.channel as SacpChannelBase).getCoordinateInfo();
+            const isHomed = !(coordinateInfos?.coordinateSystemInfo?.homed); // 0: homed, 1: need to home
+            state.isHomed = isHomed;
+            state.isMoving = false;
+        }
+
         this.socket.emit('connection:connected', { state: state, err: '' });
 
-        // Start heartbeat
-        await this.channel.startHeartbeat();
+        // Legacy
+        if (isNewVersion) {
+            const sacpClient = (this.channel as SacpChannelBase).sacpClient;
+            await (this.channel as SacpChannelBase).startHeartbeatLegacy(sacpClient, undefined, this.id);
+        } else {
+            // Start heartbeat
+            await this.channel.startHeartbeat();
+        }
 
-        // subscribe to machine errors
-        // 0x04, 0x00
+        // register handlers
+        (this.channel as SacpChannelBase).registerErrorReportHandler();
 
         // Subscribe job progress
         await (this.channel as PrintJobChannelInterface).subscribeGetPrintCurrentLineNumber();
@@ -104,7 +145,9 @@ class RayMachineInstance extends MachineInstance {
         log.info('Stop heartbeat.');
         // await this.channel.stopHeartbeat();
         // Remove await temporarily, it blocks other unsubscribes
-        await this.channel.stopHeartbeat();
+        await this.channel.stopHeartbeat(this.id);
+
+        (this.channel as SacpChannelBase).unregisterErrorReportHandler();
 
         await (this.channel as PrintJobChannelInterface).unsubscribeGetPrintCurrentLineNumber();
 

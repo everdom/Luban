@@ -1,5 +1,5 @@
 import { WorkflowStatus } from '@snapmaker/luban-platform';
-import { ResponseCallback } from '@snapmaker/snapmaker-sacp-sdk';
+import { Response, ResponseCallback } from '@snapmaker/snapmaker-sacp-sdk';
 import { PeerId } from '@snapmaker/snapmaker-sacp-sdk/dist/communication/Header';
 import { readString, readUint16, readUint32, readUint8 } from '@snapmaker/snapmaker-sacp-sdk/dist/helper';
 import {
@@ -37,6 +37,7 @@ import {
     AIR_PURIFIER,
     AIR_PURIFIER_MODULE_IDS,
     CNC_HEAD_MODULE_IDS,
+    DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN,
     DUAL_EXTRUDER_TOOLHEAD_FOR_SM2,
     EMERGENCY_STOP_BUTTON,
     ENCLOSURE_MODULE_IDS,
@@ -53,20 +54,23 @@ import {
     SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2,
 } from '../../../constants';
 import logger from '../../../lib/logger';
-import SacpClient, { CoordinateType } from '../sacp/SacpClient';
+import SacpClient, { CoordinateType, MotorPowerMode } from '../sacp/SacpClient';
 import { MarlinStateData } from '../types';
 import Channel, {
     AirPurifierChannelInterface,
     CncChannelInterface,
     EnclosureChannelInterface,
+    ExecuteGcodeResult,
     FileChannelInterface,
     LaserChannelInterface,
     NetworkServiceChannelInterface,
     PrintJobChannelInterface,
     SystemChannelInterface,
     UpgradeFirmwareOptions,
-    UploadFileOptions
+    UploadFileOptions,
 } from './Channel';
+import { ChannelEvent } from './ChannelEvent';
+import { L20WLaserToolModule, L2WLaserToolModule, L40WLaserToolModule } from '../../../../app/machines/snapmaker-2-toolheads';
 
 const log = logger('machine:channels:SacpChannel');
 
@@ -80,7 +84,7 @@ class SacpChannelBase extends Channel implements
     EnclosureChannelInterface,
     AirPurifierChannelInterface {
     // heart beat
-    private heartbeatTimerLegacy;
+    private heartbeatTimerLegacy = [];
     private heartbeatTimer;
     private shuttingDown: boolean = false;
 
@@ -103,6 +107,8 @@ class SacpChannelBase extends Channel implements
     public subscribeGetCurrentGcodeLineCallback: ResponseCallback;
 
     public subscribeEnclosureInfoCallback: ResponseCallback;
+
+    public subscribeEnclosureLightInfoCallback: ResponseCallback;
 
     public subscribePurifierInfoCallback: ResponseCallback;
 
@@ -137,6 +143,24 @@ class SacpChannelBase extends Channel implements
         }
     }
 
+    public subscribePurifierInfo() {
+        this.subscribePurifierInfoCallback = (data) => {
+            const { airPurifierStatus: { fanState, speedLevel, lifeLevel, powerState } } = new AirPurifierInfo().fromBuffer(data.response.data);
+            this.socket && this.socket.emit('Marlin:state', {
+                state: {
+                    airPurifier: true,
+                    airPurifierHasPower: powerState,
+                    airPurifierSwitch: fanState,
+                    airPurifierFanSpeed: speedLevel,
+                    airPurifierFilterHealth: lifeLevel - 1
+                }
+            });
+        };
+        this.sacpClient.subscribePurifierInfo({ interval: 1000 }, this.subscribePurifierInfoCallback).then(res => {
+            log.info(`subscribe purifier info, ${res.response.result}`);
+        });
+    }
+
     public async startHeartbeat(): Promise<void> {
         log.info('Start heartbeat.');
 
@@ -146,8 +170,11 @@ class SacpChannelBase extends Channel implements
                 this.heartbeatTimer = null;
             }
 
-            this.heartbeatTimer = setTimeout(() => {
+            this.heartbeatTimer = setTimeout(async () => {
                 log.info('Lost heartbeat, close connection.');
+
+                await this.connectionClose({ force: true });
+
                 this.socket && this.socket.emit('connection:close');
             }, 10000);
 
@@ -175,11 +202,11 @@ class SacpChannelBase extends Channel implements
         };
 
         const res = await this.sacpClient.subscribeHeartbeat({ interval: 2000 }, subscribeHeartbeatCallback);
-
+        this.subscribePurifierInfo();
         log.info(`Subscribe heartbeat, result = ${res.code}`);
     }
 
-    public async stopHeartbeat(): Promise<void> {
+    public async stopHeartbeat(id?: string): Promise<void> {
         this.shuttingDown = true;
 
         // Remove heartbeat timeout check
@@ -187,20 +214,20 @@ class SacpChannelBase extends Channel implements
             clearTimeout(this.heartbeatTimer);
             this.heartbeatTimer = null;
         }
-        if (this.heartbeatTimerLegacy) {
-            clearTimeout(this.heartbeatTimerLegacy);
-            this.heartbeatTimerLegacy = null;
+        if (this.heartbeatTimerLegacy[id]) {
+            clearTimeout(this.heartbeatTimerLegacy[id]);
+            this.heartbeatTimerLegacy[id] = null;
         }
 
         // Cancel subscription of heartbeat
         const res = await this.sacpClient.unsubscribeHeartbeat(null);
-        log.info(`Unsubscribe heartbeat, result = ${res.code}`);
+        log.info(`Unsubscribe heartbeat, result = ${res.code}, ${id}, ${this.heartbeatTimerLegacy[id]}`);
     }
 
     /**
      * Generic execute G-code commands.
      */
-    public async executeGcode(gcode: string): Promise<boolean> {
+    public async executeGcode(gcode: string): Promise<ExecuteGcodeResult> {
         const gcodeLines = gcode.split('\n');
 
         const promises = [];
@@ -213,11 +240,16 @@ class SacpChannelBase extends Channel implements
         // if any gcode line fails, then fails
         for (const res of results) {
             if (res.response.result !== 0) {
-                return false;
+                return {
+                    result: -1,
+                };
             }
         }
 
-        return true;
+        return {
+            result: 0,
+            text: 'ok',
+        };
     }
 
     /**
@@ -307,6 +339,22 @@ class SacpChannelBase extends Channel implements
         return machineInfo;
     }
 
+
+    public getModuleIdentifier(module: ModuleInfo): string {
+        // hard-code for artisan, 2.0 dualextruder and artisan dualextruder have same moduleId
+        if (module.moduleId === 13) {
+            if (module.hardwareVersion >= 129 && module.hardwareVersion <= 137) {
+                // 2.0 dualextruder
+                return DUAL_EXTRUDER_TOOLHEAD_FOR_SM2; // MODULEID_MAP['13'];
+            } else {
+                // aritsan dualextruder
+                return DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN; // MODULEID_MAP['70000'];
+            }
+        } else {
+            return MODULEID_MAP[module.moduleId];
+        }
+    }
+
     /**
      * Get module info.
      */
@@ -319,7 +367,7 @@ class SacpChannelBase extends Channel implements
         this.moduleInfos = {};
         for (const module of moduleInfoList) {
             if (includes(definedModuleIds, String(module.moduleId))) {
-                const identifier = MODULEID_MAP[module.moduleId];
+                const identifier = this.getModuleIdentifier(module);
 
                 if (!this.moduleInfos[identifier]) {
                     this.moduleInfos[identifier] = module;
@@ -403,6 +451,26 @@ class SacpChannelBase extends Channel implements
 
     // interface: LaserChannelInterface
 
+    public async turnOnTestLaser(): Promise<boolean> {
+        const module = this.getLaserToolHeadModule();
+        if (!module) {
+            log.error('Set laser power, no matched laser module.');
+            return false;
+        }
+
+        let power;
+        if (includes([19, 20], module.moduleId)) {
+            // 20W & 40W
+            power = 0.2;
+        } else {
+            power = 1;
+        }
+
+        log.info(`turnOnTestLaser, power = ${power}`);
+        const { response } = await this.sacpClient.SetLaserPower(module.key, power);
+        return response.result === 0;
+    }
+
     public async updateLaserPower(value: number): Promise<boolean> {
         const module = this.getLaserToolHeadModule();
         if (!module) {
@@ -415,6 +483,16 @@ class SacpChannelBase extends Channel implements
         log.info(`updateLaserPower, ${JSON.stringify(response)}`);
 
         return response.result === 0;
+    }
+
+    public async turnOnCrosshair(): Promise<boolean> {
+        const executeResult = await this.executeGcode('M2000 L13 P1');
+        return (executeResult.result === 0);
+    }
+
+    public async turnOffCrosshair(): Promise<boolean> {
+        const executeResult = await this.executeGcode('M2000 L13 P0');
+        return (executeResult.result === 0);
     }
 
     public async getCrosshairOffset(): Promise<{ x: number; y: number }> {
@@ -736,8 +814,9 @@ class SacpChannelBase extends Channel implements
     }
 
     // TODO: refactor startHeartbeatLegacy(), put subscriptions on machine instances.
-    public startHeartbeatLegacy = async (sacpClient: SacpClient, client?: net.Socket) => {
+    public startHeartbeatLegacy = async (sacpClient: SacpClient, client?: net.Socket, id = 'uuid') => {
         this.sacpClient = sacpClient;
+        log.info(`SACP start heartbeat ${id}`,);
 
         let stateData: MarlinStateData = {};
 
@@ -762,25 +841,23 @@ class SacpChannelBase extends Channel implements
             }
         });
 
-        this.sacpClient.setHandler(0x01, 0x36, ({ param }) => {
+        // this.sacpClient.on('311', ())
+        this.sacpClient.setHandler(0x01, 0x36, ({ param, packet }) => {
             const isHomed = readUint8(param, 0);
             stateData = {
                 ...stateData,
                 isHomed: !isHomed
             };
-            if (stateData.headType !== HEAD_PRINTING) {
-                this.sacpClient.updateCoordinate(CoordinateType.WORKSPACE).then(({ response }) => {
-                    log.info(`updateCoordinateType, ${response.result}`);
-                });
-            }
+            this.sacpClient.ack(0x01, 0x36, packet, new Response(0).toBuffer()).then(() => {
+                if (stateData.headType !== HEAD_PRINTING) {
+                    this.sacpClient.getCurrentCoordinateInfo().then(({ response }) => {
+                        this.sacpClient.updateCoordinate(CoordinateType.WORKSPACE).then(({ response }) => {
+                            log.info(`updateCoordinateType, ${response.result}`);
+                        });
+                    });
+                }
+            });
             this.socket && this.socket.emit('move:status', { isHoming: false });
-        });
-
-        this.sacpClient.setHandler(0x04, 0x00, ({ param }) => {
-            const level = readUint8(param, 0);
-            const owner = readUint16(param, 1);
-            const error = readUint8(param, 3);
-            this.socket && this.socket.emit('manager:error', { level, owner, errorCode: error });
         });
 
         this.subscribeHeartCallback = async (data) => {
@@ -791,15 +868,15 @@ class SacpChannelBase extends Channel implements
 
             const statusKey = readUint8(data.response.data, 0);
 
-            if (this.heartbeatTimerLegacy) {
-                clearTimeout(this.heartbeatTimerLegacy);
-                this.heartbeatTimerLegacy = null;
+            if (this.heartbeatTimerLegacy[id]) {
+                clearTimeout(this.heartbeatTimerLegacy[id]);
+                this.heartbeatTimerLegacy[id] = null;
             }
 
-            this.heartbeatTimerLegacy = setTimeout(() => {
+            this.heartbeatTimerLegacy[id] = setTimeout(() => {
                 client && client.destroy();
-                log.info('TCP close');
-                this.socket && this.socket.emit('connection:close');
+                log.info(`SACP close ${id}, ${this.heartbeatTimerLegacy[id]}`,);
+                this.heartbeatTimerLegacy[id] && this.socket && this.socket.emit('connection:close');
             }, 10000);
 
             this.machineStatus = WORKFLOW_STATUS_MAP[statusKey];
@@ -814,6 +891,8 @@ class SacpChannelBase extends Channel implements
                 }
             });
         };
+
+        // this.setMotorPowerMode(0);
 
         // Subscribe heart beat
         this.shuttingDown = false;
@@ -1015,18 +1094,21 @@ class SacpChannelBase extends Channel implements
         // TODO: Note this is only for Artisan + J1, not for RayInstance, refactor this
         this.subscribeGetCurrentGcodeLineCallback = async ({ response }) => {
             if (!this.totalLine || !this.estimatedTime) {
-                console.log('Get print file info...');
-                this.sacpClient.getPrintingFileInfo().then((result) => {
-                    console.log('Get print file info, result =', result);
-                    const { totalLine, estimatedTime } = result.data;
-                    if (totalLine) {
-                        this.totalLine = totalLine;
-                    }
-                    if (estimatedTime) {
-                        this.estimatedTime = estimatedTime;
-                    }
-                });
+                if (includes([WorkflowStatus.Running], this.machineStatus)) {
+                    log.info('Get print file info...');
+                    this.sacpClient.getPrintingFileInfo().then((result) => {
+                        // log.debug('Get print file info, result =', result);
+                        const { totalLine, estimatedTime } = result.data;
+                        if (totalLine) {
+                            this.totalLine = totalLine;
+                        }
+                        if (estimatedTime) {
+                            this.estimatedTime = estimatedTime;
+                        }
+                    });
+                }
             }
+
             const { currentLine } = new GcodeCurrentLine().fromBuffer(response.data);
             const progress = Math.round((currentLine / this.totalLine) * 100) / 100;
             const sliceTime = new Date().getTime() - this.startTime;
@@ -1039,7 +1121,7 @@ class SacpChannelBase extends Channel implements
                 estimatedTime: this.estimatedTime * 1000,
                 progress: currentLine === this.totalLine ? 1 : progress,
                 remainingTime: remainingTime,
-                printStatus: currentLine === this.totalLine ? COMPLUTE_STATUS : ''
+                printStatus: currentLine >= this.totalLine ? COMPLUTE_STATUS : ''
             };
 
             if (includes([WorkflowStatus.Running, WorkflowStatus.Paused], this.machineStatus)) {
@@ -1078,6 +1160,23 @@ class SacpChannelBase extends Channel implements
         this.sacpClient.subscribeEnclosureInfo({ interval: 1000 }, this.subscribeEnclosureInfoCallback).then(res => {
             log.info(`subscribe enclosure info, ${res.response.result}`);
         });
+        // FIXME: init enclosure light Info for j1, only use for j1
+        this.subscribeEnclosureLightInfoCallback = (data) => {
+            const module = this.getEnclosureModule();
+            if (!module) {
+                return;
+            }
+            const buffer = data.response.data;
+            const lightIntensity = readUint8(buffer, 1);
+            stateData = {
+                ...stateData,
+                ledValue: Math.round(lightIntensity / 255 * 100), // lightIntensity range from 0 to 255
+            };
+        };
+        this.sacpClient.subscribeEnclosureLightInfo({ interval: 1000 }, this.subscribeEnclosureLightInfoCallback).then(res => {
+            log.info(`subscribe enclosure light info, ${res.response.result}`);
+        });
+
         this.subscribePurifierInfoCallback = (data) => {
             const { airPurifierStatus: { fanState, speedLevel, lifeLevel, powerState } } = new AirPurifierInfo().fromBuffer(data.response.data);
             stateData = {
@@ -1145,6 +1244,31 @@ class SacpChannelBase extends Channel implements
         });
     };
 
+    /**
+     * Register error report handler.
+     */
+    public registerErrorReportHandler(): void {
+        if (!this.socket) {
+            return;
+        }
+
+        // Set error report handler
+        this.sacpClient.setHandler(0x04, 0x00, ({ param }) => {
+            const level = readUint8(param, 0);
+            const owner = readUint16(param, 1);
+            const errorCode = readUint8(param, 3);
+
+            this.emit(ChannelEvent.ErrorReport, { level, owner, errorCode });
+        });
+    }
+
+    /**
+     * Unregister error report handler.
+     */
+    public unregisterErrorReportHandler(): void {
+        this.sacpClient.unsetHandler(0x04, 0x00);
+    }
+
     public getCoordinateInfo = async () => {
         return this.sacpClient.getCurrentCoordinateInfo();
     };
@@ -1158,11 +1282,6 @@ class SacpChannelBase extends Channel implements
             log.info(`Go-Home, ${response}`);
             this.socket && this.socket.emit('serialport:read', { data: response.result === 0 ? 'OK' : 'WARNING' });
         });
-        if (headType === HEAD_LASER || headType === HEAD_CNC) {
-            await this.sacpClient.updateCoordinate(CoordinateType.WORKSPACE).then(res => {
-                log.info(`Update Coordinate: ${res}`);
-            });
-        }
     };
 
     public coordinateMove = async ({ moveOrders, jogSpeed, headType, beforeGcodeStart = false }) => {
@@ -1183,9 +1302,18 @@ class SacpChannelBase extends Channel implements
 
     public setWorkOrigin = async ({ xPosition, yPosition, zPosition, bPosition }) => {
         log.info(`position: ${xPosition}, ${yPosition}, ${zPosition}, ${bPosition}`);
-        const coordinateInfos = [new CoordinateInfo(Direction.X1, 0), new CoordinateInfo(Direction.Y1, 0), new CoordinateInfo(Direction.Z1, 0)];
+        const coordinateInfos = [];
+        if (xPosition) {
+            coordinateInfos.push(new CoordinateInfo(Direction.X1, xPosition));
+        }
+        if (yPosition) {
+            coordinateInfos.push(new CoordinateInfo(Direction.Y1, yPosition));
+        }
+        if (zPosition) {
+            coordinateInfos.push(new CoordinateInfo(Direction.Z1, zPosition));
+        }
         if (bPosition) {
-            coordinateInfos.push(new CoordinateInfo(Direction.B1, 0));
+            coordinateInfos.push(new CoordinateInfo(Direction.B1, bPosition));
         }
         await this.sacpClient.setWorkOrigin(coordinateInfos).then(res => {
             log.info(`Set Work Origin: ${res.data}`);
@@ -1219,7 +1347,11 @@ class SacpChannelBase extends Channel implements
     private getToolHeadModule(extruderIndex: number | string): { module: ModuleInfo, extruderIndex: number } {
         extruderIndex = Number(extruderIndex);
 
-        const modules = this.moduleInfos && (this.moduleInfos[DUAL_EXTRUDER_TOOLHEAD_FOR_SM2] || this.moduleInfos[SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2]);
+        const modules = this.moduleInfos && (
+            this.moduleInfos[DUAL_EXTRUDER_TOOLHEAD_FOR_SM2]
+            || this.moduleInfos[DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN]
+            || this.moduleInfos[SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2]
+        );
         if (!modules) {
             return null;
         }
@@ -1344,7 +1476,9 @@ class SacpChannelBase extends Channel implements
 
     public async updateNozzleOffset(extruderIndex, direction, distance) {
         const toolHead = this.moduleInfos
-            && (this.moduleInfos[DUAL_EXTRUDER_TOOLHEAD_FOR_SM2] || this.moduleInfos[SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2]);
+            && (this.moduleInfos[DUAL_EXTRUDER_TOOLHEAD_FOR_SM2]
+                || this.moduleInfos[DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN]
+                 || this.moduleInfos[SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2]);
         // || this.moduleInfos[HEADT_BED_FOR_SM2]); //
         if (!toolHead) {
             log.error(`non-eixst toolHead 3dp, moduleInfos:${this.moduleInfos}`,);
@@ -1388,20 +1522,39 @@ class SacpChannelBase extends Channel implements
         }
     }
 
-    public async setAbsoluteWorkOrigin({ z, isRotate = false }: {
-        x: number, y: number, z: number, isRotate: boolean
+    public async setAbsoluteWorkOrigin({ x, y, z, isRotate = false }: {
+        x?: number, y?: number, z: number, isRotate: boolean
     }) {
         try {
             const res1 = await this.sacpClient.updateCoordinate(CoordinateType.MACHINE);
             log.debug(`updateCoordinate CoordinateType.MACHINE res: ${JSON.stringify(res1)}`);
             await this.sacpClient.getCurrentCoordinateInfo().then(async ({ coordinateSystemInfo }) => {
+                const xNow = coordinateSystemInfo.coordinates.find(item => item.key === Direction.X1).value;
+                const yNow = coordinateSystemInfo.coordinates.find(item => item.key === Direction.Y1).value;
                 const zNow = coordinateSystemInfo.coordinates.find(item => item.key === Direction.Z1).value;
-                log.debug(`current positions, ${zNow}, ${z}`);
-                // calculate the absolute distance on seperate axis, same reason with coordinate moving func 'coordinateMove'
+                log.debug(`current positions, (${xNow}, ${yNow}, ${zNow}), (${x}, ${y}, ${z})`);
 
-                const newZ = new CoordinateInfo(Direction.Z1, isRotate ? 0 : zNow - z);
-                const newCoord = [newZ];
-                log.debug(`new positions, ${zNow - z}, ${JSON.stringify(newCoord)}`);
+                // calculate the absolute distance on seperate axis, same reason with coordinate moving func 'coordinateMove'
+                const newCoord = [];
+                const setXCoord = () => {
+                    const newX = new CoordinateInfo(Direction.X1, xNow - x);
+                    newCoord.push(newX);
+                };
+                const setYCoord = () => {
+                    const newY = new CoordinateInfo(Direction.Y1, yNow - y);
+                    newCoord.push(newY);
+                };
+                const setZCoord = () => {
+                    const newZ = new CoordinateInfo(Direction.Z1, isRotate ? 0 : zNow - z);
+                    newCoord.push(newZ);
+                };
+
+                if (!isRotate) {
+                    typeof x !== 'undefined' && setXCoord();
+                    typeof y !== 'undefined' && setYCoord();
+                }
+                typeof z !== 'undefined' && setZCoord();
+                log.debug(`new positions, (${xNow - x}, ${yNow - y}, ${zNow - z}), ${JSON.stringify(newCoord)}`);
                 await this.sacpClient.updateCoordinate(CoordinateType.WORKSPACE);
                 const res = await this.sacpClient.setWorkOrigin(newCoord);
                 log.debug(`setAbsoluteWorkOrigin res:${JSON.stringify(res)}`);
@@ -1420,11 +1573,16 @@ class SacpChannelBase extends Channel implements
             return;
         }
         const { laserToolHeadInfo } = await this.sacpClient.getLaserToolHeadInfo(headModule.key);
-        log.debug(`laserFocalLength:${laserToolHeadInfo.laserFocalLength}, materialThickness: ${materialThickness}, platformHeight:${laserToolHeadInfo.platformHeight}`);
+        log.info(`toolHead:${toolHead}, hasLaserFocalLenth:${includes([L2WLaserToolModule.identifier, L20WLaserToolModule.identifier, L40WLaserToolModule.identifier], toolHead)}, laserFocalLength:${laserToolHeadInfo.laserFocalLength}, materialThickness: ${materialThickness}, platformHeight:${laserToolHeadInfo.platformHeight}`);
+        let z;
+        if (includes([L2WLaserToolModule.identifier, L20WLaserToolModule.identifier, L40WLaserToolModule.identifier], toolHead)) {
+            z = laserToolHeadInfo.platformHeight + materialThickness;
+        } else {
+            z = laserToolHeadInfo.laserFocalLength + laserToolHeadInfo.platformHeight + materialThickness;
+        }
+
         await this.setAbsoluteWorkOrigin({
-            x: 0,
-            y: 0,
-            z: laserToolHeadInfo.laserFocalLength + laserToolHeadInfo.platformHeight + materialThickness,
+            z,
             isRotate
         });
     }
@@ -1444,6 +1602,10 @@ class SacpChannelBase extends Channel implements
 
     public async getNetworkStationState(): Promise<NetworkStationState> {
         return this.sacpClient.getNetworkStationState();
+    }
+
+    public async setMotorPowerMode(setMotorPowerHoldMode: MotorPowerMode) {
+        return this.sacpClient.setMotorPowerHoldMode(setMotorPowerHoldMode);
     }
 }
 

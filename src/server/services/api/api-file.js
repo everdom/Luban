@@ -1,5 +1,4 @@
 import * as fs from 'fs-extra';
-import mv from 'mv';
 import path from 'path';
 import { v4 as uuid } from 'uuid';
 
@@ -16,14 +15,13 @@ import { generateRandomPathName } from '../../../shared/lib/random-utils';
 import { removeSpecialChars } from '../../../shared/lib/utils';
 import DataStorage, { rmDir } from '../../DataStorage';
 import { ERR_BAD_REQUEST, ERR_INTERNAL_SERVER_ERROR, HEAD_CNC, HEAD_LASER, HEAD_PRINTING } from '../../constants';
-import { PROTOCOL_TEXT } from '../../controllers/constants';
 import { unzipFile, zipFolder } from '../../lib/archive';
 import { packFirmware } from '../../lib/firmware-build';
 import logger from '../../lib/logger';
 import { convertFileToSTL } from '../../lib/model-to-stl';
 import { parseLubanGcodeHeader } from '../../lib/parseGcodeHeader';
 import { pathWithRandomSuffix } from '../../lib/random-utils';
-import store from '../../store';
+import { textSerialChannel } from '../machine/channels/TextSerialChannel';
 
 const log = logger('api:file');
 
@@ -152,21 +150,23 @@ export const set = async (req, res) => {
                 });
             } else { // get blob file
                 const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
-                mv(filePath, uploadPath, (err) => {
+                try {
+                    await fs.copyFile(filePath, uploadPath);
+
+                    res.send({
+                        originalName,
+                        uploadName,
+                        children
+                    });
+                    res.end();
+                } catch (err) {
                     if (err) {
                         log.error(`Failed to upload file ${originalName}`);
                         res.status(ERR_INTERNAL_SERVER_ERROR).send({
                             msg: `Failed to upload file ${originalName}: ${err}`
                         });
-                    } else {
-                        res.send({
-                            originalName,
-                            uploadName,
-                            children
-                        });
-                        res.end();
                     }
-                });
+                }
             }
         } else { // post file pathname in electron
             const ret = await cpFileToTmp(JSON.parse(req.body.file));
@@ -263,22 +263,23 @@ export const uploadGcodeFile = async (req, res) => {
         uploadName = pathWithRandomSuffix(originalName);
         uploadName = uploadName.toLowerCase();
         uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
-        mv(originalPath, uploadPath, (err) => {
-            if (err) {
-                log.error(`Failed to upload file ${originalName}: ${err}`);
-                res.status(ERR_INTERNAL_SERVER_ERROR).send({
-                    msg: `Failed to upload file ${originalName}: ${err}`
-                });
-            } else {
-                const gcodeHeader = parseLubanGcodeHeader(uploadPath);
-                res.send({
-                    originalName,
-                    uploadName,
-                    gcodeHeader
-                });
-                res.end();
-            }
-        });
+
+        try {
+            await fs.copyFile(originalPath, uploadPath);
+
+            const gcodeHeader = parseLubanGcodeHeader(uploadPath);
+            res.send({
+                originalName,
+                uploadName,
+                gcodeHeader
+            });
+            res.end();
+        } catch (e) {
+            log.error(`Failed to upload file ${originalName}: ${e}`);
+            res.status(ERR_INTERNAL_SERVER_ERROR).send({
+                msg: `Failed to upload file ${originalName}: ${e}`
+            });
+        }
     } else {
         const { casePath, name } = req.body;
         originalPath = `${DataStorage.userCaseDir}/${casePath}/${name}`;
@@ -310,37 +311,32 @@ export const uploadGcodeFile = async (req, res) => {
             });
         }
     }
-
-    /*
-    const controller = store.get(`controllers["${port}/${dataSource}"]`);
-    if (!controller) {
-        return;
-    }
-    */
 };
 
 /**
  * deprecated
  */
-export const uploadUpdateFile = (req, res) => {
+export const uploadUpdateFile = async (req, res) => {
     const file = req.files.file;
-    const port = req.body.port;
-    const dataSource = req.body.dataSource || PROTOCOL_TEXT;
     const originalName = removeSpecialChars(path.basename(file.name));
     const uploadName = pathWithRandomSuffix(originalName);
     const uploadPath = `${DataStorage.tmpDir}/${uploadName}`;
-    mv(file.path, uploadPath, (err) => {
+    try {
+        await fs.copyFile(file.path, uploadPath);
+
+        res.send({
+            originalName,
+            uploadName
+        });
+        res.end();
+    } catch (err) {
         if (err) {
             log.error(`Failed to upload file ${originalName}`);
-        } else {
-            res.send({
-                originalName,
-                uploadName
-            });
-            res.end();
+            return;
         }
-    });
-    const controller = store.get(`controllers["${port}/${dataSource}"]`);
+    }
+
+    const controller = textSerialChannel.getController();
     if (!controller) {
         return;
     }

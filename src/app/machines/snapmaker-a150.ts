@@ -7,7 +7,11 @@ import {
     printToolHead,
     standardLaserToolHead,
     standardCNCToolHead,
+    highPower200WCNCToolHead,
+    L20WLaserToolModule,
+    L2WLaserToolModule,
 } from './snapmaker-2-toolheads';
+import { JobOffsetMode } from '../constants/coordinate';
 
 /*
     {
@@ -25,7 +29,7 @@ export const machine: Machine = {
     img: '/resources/images/machine/size-2.0-A150.png',
 
     metadata: {
-        size: { x: 160, y: 160, z: 145 },
+        size: { x: 160, y: 160, z: 140 },
 
         toolHeads: [
             {
@@ -37,7 +41,7 @@ export const machine: Machine = {
                 configPath: 'printing/a150_dual',
                 workRange: {
                     min: [0, 0, 0],
-                    max: [160, 160, 110],
+                    max: [145, 145, 105],
                 },
             },
             {
@@ -48,6 +52,12 @@ export const machine: Machine = {
                     max: [167, 165, 150],
                 },
                 supportCameraCapture: true,
+                runBoundaryModeOptions: [
+                    {
+                        label: 'Laser Spot',
+                        value: JobOffsetMode.LaserSpot,
+                    },
+                ]
             },
             {
                 identifier: highPower10WLaserToolHead.identifier,
@@ -57,11 +67,51 @@ export const machine: Machine = {
                     max: [167, 165, 120], // TODO: check data
                 },
                 supportCameraCapture: true,
+                runBoundaryModeOptions: [
+                    {
+                        label: 'Laser Spot',
+                        value: JobOffsetMode.LaserSpot,
+                    },
+                ]
+            },
+            {
+                identifier: L20WLaserToolModule.identifier,
+                configPath: 'laser/a150_20w',
+                workRange: {
+                    min: [0, 0, 0],
+                    max: [160, 155, 0], // Correct this later
+                },
+                disableRemoteStartPrint: true,
+                runBoundaryModeOptions: [
+                    // {
+                    //     label: 'Laser Spot',
+                    //     value: JobOffsetMode.LaserSpot,
+                    // },
+                ]
+            },
+            {
+                identifier: L2WLaserToolModule.identifier,
+                configPath: 'laser/a150_2w',
+                workRange: {
+                    min: [0, 0, 0],
+                    max: [155, 150, 0], // Correct this later
+                },
+                disableRemoteStartPrint: false,
+                runBoundaryModeOptions: [
+                    {
+                        label: 'Crosshair',
+                        value: JobOffsetMode.Crosshair,
+                    }
+                ]
             },
             {
                 identifier: standardCNCToolHead.identifier,
                 configPath: 'cnc/a150_standard',
             },
+            {
+                identifier: highPower200WCNCToolHead.identifier,
+                configPath: 'cnc/200W',
+            }
         ],
 
         slicerVersion: 0,

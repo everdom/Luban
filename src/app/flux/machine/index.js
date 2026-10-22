@@ -21,7 +21,7 @@ import { valueOf } from '../../lib/contants-utils';
 import { controller } from '../../communication/socket-communication';
 import i18n from '../../lib/i18n';
 import log from '../../lib/log';
-import { SnapmakerOriginalMachine } from '../../machines';
+import { SnapmakerOriginalExtendedMachine, SnapmakerOriginalMachine } from '../../machines';
 import { PresetModel } from '../../preset-model';
 import { machineStore, printingStore } from '../../store/local-storage';
 import { actions as editorActions } from '../editor';
@@ -56,7 +56,7 @@ const INITIAL_STATE = {
      */
     activeMachine: null,
 
-    size: MACHINE_SERIES.ORIGINAL.metadata.size,
+    size: SnapmakerOriginalMachine.metadata.size,
 
     // Serial port
 
@@ -103,6 +103,8 @@ const INITIAL_STATE = {
     enable3dpLivePreview: false,
     // wifi connection, home button in control widget
     homingModal: false,
+
+    isMultiDualExtrusion: false
 };
 
 export const actions = {
@@ -187,6 +189,13 @@ export const actions = {
             dispatch(
                 baseActions.updateState({
                     enable3dpLivePreview: false
+                })
+            );
+        }
+        if (machineStore.get('machine.isMultiDualExtrusion')) {
+            dispatch(
+                baseActions.updateState({
+                    isMultiDualExtrusion: machineStore.get('machine.isMultiDualExtrusion')
                 })
             );
         }
@@ -361,10 +370,10 @@ export const actions = {
 
 
         // TODO: machine hard-coded here, refactor later.
-        if (series === MACHINE_SERIES.ORIGINAL.identifier) {
+        if (series === SnapmakerOriginalMachine.identifier) {
             dispatch(actions.setZAxisModuleState(0));
         }
-        if (series === MACHINE_SERIES.ORIGINAL_LZ.identifier) {
+        if (series === SnapmakerOriginalExtendedMachine.identifier) {
             dispatch(actions.setZAxisModuleState(1));
         }
     },
@@ -390,7 +399,7 @@ export const actions = {
     setMachineModules: (machineModules) => {
         return (dispatch) => {
             if (machineModules.length > 0) {
-                machineStore.set('machine.modules', machineModules);
+                machineStore.replace('machine.modules', machineModules);
             } else {
                 machineStore.unset('machine.modules');
             }
@@ -514,8 +523,17 @@ export const actions = {
         machineStore.set('enable3dpLivePreview', bool);
         dispatch(baseActions.updateState({ enable3dpLivePreview: bool }));
         modelGroup.setClipperEnable(bool);
-    }
+    },
     // endregion
+
+    updateIsMultiDualExtrusion: (value) => (dispatch) => {
+        machineStore.set('machine.isMultiDualExtrusion', value);
+        dispatch(
+            baseActions.updateState({
+                isMultiDualExtrusion: value
+            })
+        );
+    }
 };
 
 export default function reducer(state = INITIAL_STATE, action) {

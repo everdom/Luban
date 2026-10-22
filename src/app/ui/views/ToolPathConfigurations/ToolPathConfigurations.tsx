@@ -91,6 +91,7 @@ const ToolPathConfigurations: React.FC<ToolPathConfigurationsProps> = ({ toolpat
                 if (newSettings.shaft_diameter) newSettings.shaft_diameter.default_value = toolParams?.toolShaftDiameter;
                 if (newSettings.jog_speed) newSettings.jog_speed.default_value = gcodeConfig?.jogSpeed;
                 if (newSettings.plunge_speed) newSettings.plunge_speed.default_value = gcodeConfig?.plungeSpeed;
+                if (newSettings.safety_height) newSettings.safety_height.default_value = gcodeConfig?.safetyHeight;
                 if (newSettings.work_speed) newSettings.work_speed.default_value = gcodeConfig?.workSpeed;
                 if (newSettings.step_down) newSettings.step_down.default_value = gcodeConfig?.stepDown;
                 if (newSettings.step_over) newSettings.step_over.default_value = gcodeConfig?.stepOver;
@@ -114,6 +115,9 @@ const ToolPathConfigurations: React.FC<ToolPathConfigurationsProps> = ({ toolpat
                 if (newSettings.auxiliary_air_pump) newSettings.auxiliary_air_pump.default_value = gcodeConfig?.auxiliaryAirPump;
                 if (newSettings.half_diode_mode) newSettings.half_diode_mode.default_value = gcodeConfig?.halfDiodeMode;
                 if (newSettings.constant_power_mode) newSettings.constant_power_mode.default_value = gcodeConfig?.constantPowerMode;
+                if (newSettings.dot_with_compensation) newSettings.dot_with_compensation.default_value = gcodeConfig?.dotWithCompensation;
+                if (newSettings.scanning_pre_accel_ratio) newSettings.scanning_pre_accel_ratio.default_value = gcodeConfig?.scanningPreAccelRatio;
+                if (newSettings.scanning_offset) newSettings.scanning_offset.default_value = gcodeConfig?.scanningOffset;
             }
         }
 

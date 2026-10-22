@@ -34,10 +34,12 @@ import RayUploadWidget from '../../widgets/RayUploadWidget';
 import VisualizerWidget from '../../widgets/WorkspaceVisualizer';
 import VisualizerOverlay from './VisualizerOverlay';
 import FirmwareUpgradeModal from './modals/FirmwareUpgradeModal';
+import FirmwareNetworkUpgradeModal from './modals/FirmwareNetworkUpgradeModal';
 import MachineLogModal from './modals/MachineLogModal';
 import MachineNetworkModal from './modals/MachineNetworkModal';
 import MachineSettingsModal from './modals/MachineSettingsModal';
 import MachineControlModal from './modals/MachineControlModal';
+import MachineMonitor from './MachineMonitor';
 
 
 const allWidgets = {
@@ -111,6 +113,7 @@ const RayLaserWorkspace: React.FC<RayLaserWorkspaceProps> = ({ isPopup, onClose,
 
     const [showMachineSettingsModal, setShowMachineSettingsModal] = useState(false);
     const [showFirmwareUpgradeModal, setShowFirmwareUpgradeModal] = useState(false);
+    const [showFirmwareNetworkUpgradeModal, setShowFirmwareNetworkUpgradeModal] = useState(true);
     const [showMachineNetworkModal, setShowMachineNetworkModal] = useState(false);
     const [showMachineControlModal, setShowMachineControlModal] = useState(false);
     const [showMachineLogModal, setShowMachineLogModal] = useState(false);
@@ -356,6 +359,9 @@ const RayLaserWorkspace: React.FC<RayLaserWorkspaceProps> = ({ isPopup, onClose,
 
                 {renderModalView(connected)}
 
+                {/* Machine Monitor */}
+                <MachineMonitor />
+
                 {/* Machine Settings */}
                 {
                     showMachineSettingsModal && (
@@ -370,6 +376,15 @@ const RayLaserWorkspace: React.FC<RayLaserWorkspaceProps> = ({ isPopup, onClose,
                     showFirmwareUpgradeModal && (
                         <FirmwareUpgradeModal
                             onClose={() => setShowFirmwareUpgradeModal(false)}
+                        />
+                    )
+                }
+
+                {/* Firmware Network Upgrade */}
+                {
+                    showFirmwareNetworkUpgradeModal && (
+                        <FirmwareNetworkUpgradeModal
+                            onClose={() => setShowFirmwareNetworkUpgradeModal(false)}
                         />
                     )
                 }

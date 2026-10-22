@@ -1,6 +1,7 @@
 import { defaultAPIFactory, request } from './base';
 
 import * as env from './api-environment';
+import * as i18n from './api-i18n';
 
 
 //
@@ -281,6 +282,15 @@ const getCaseResourcesList = (() => {
     };
 })();
 
+//
+// user info
+//
+const getUserInfo = (() => {
+    return async (token) => {
+        const getData = defaultAPIFactory(() => request.get('/api/common/accounts/current').query({ token }));
+        return getData();
+    };
+})();
 
 const getInformationFlow = (() => {
     // cache CaseResources data for once load
@@ -300,11 +310,17 @@ export default {
     // version
     getLatestVersion,
 
+    // user info
+    getUserInfo,
+
     // utils
     utils,
 
     // Environment / Project
     env,
+
+    // i18n
+    i18n,
 
     uploadFile,
     uploadCaseFile,

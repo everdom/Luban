@@ -10,8 +10,9 @@ import {
     PAGE_PROCESS,
 } from '../../../constants';
 import { actions as editorActions } from '../../../flux/editor';
+import { RootState } from '../../../flux/index.def';
 import { actions as projectActions } from '../../../flux/project';
-import { actions as workspaceActions } from '../../../flux/workspace';
+import gcodeActions from '../../../flux/workspace/actions-gcode';
 import { logGcodeExport } from '../../../lib/gaEvent';
 import i18n from '../../../lib/i18n';
 import modal from '../../../lib/modal';
@@ -26,7 +27,6 @@ import { LaserWorkspaceRay } from '../../pages/laser-workspace-ray';
 import { renderPopup } from '../../utils';
 import Thumbnail from '../CncLaserShared/Thumbnail';
 import styles from './styles.styl';
-import { RootState } from '../../../flux/index.def';
 
 export type LoadGcodeOptions = {
     renderImmediately?: boolean;
@@ -41,6 +41,7 @@ interface OutputViewProps {
 const Output: React.FC<OutputViewProps> = (props) => {
     const { headType, loadGcodeOptions } = props;
 
+    const isOnABPosition = useSelector((state: RootState) => state.laser.isOnABPosition);
     const activeMachine = useSelector((state: RootState) => state.machine.activeMachine);
 
     const displayedType = useSelector((state: RootState) => state[headType]?.displayedType);
@@ -124,7 +125,7 @@ const Output: React.FC<OutputViewProps> = (props) => {
         logGcodeExport(headType, 'workspace', materials.isRotate);
 
         // workspace render G-code
-        await dispatch(workspaceActions.renderGcodeFile(gcodeFile, true, loadGcodeOptions?.renderImmediately || false));
+        await dispatch(gcodeActions.renderGcodeFile(gcodeFile, true, loadGcodeOptions?.renderImmediately || false));
 
         // open workspace
         setShowWorkspace(true);
@@ -210,7 +211,7 @@ const Output: React.FC<OutputViewProps> = (props) => {
                         type="primary"
                         priority="level-one"
                         onClick={actions.switchToProcess}
-                        disabled={!hasModel ?? false}
+                        disabled={isOnABPosition || (!hasModel ?? false)}
                     >
                         {i18n._('key-CncLaser/G-codeAction-Next')}
                     </Button>
@@ -220,7 +221,7 @@ const Output: React.FC<OutputViewProps> = (props) => {
                         type="primary"
                         priority="level-one"
                         onClick={actions.preview}
-                        disabled={(!hasToolPathModel ?? false) || shouldRenderToolPaths}
+                        disabled={isOnABPosition || ((!hasToolPathModel ?? false) || shouldRenderToolPaths)}
                     >
                         {i18n._('key-CncLaser/G-codeAction-Generate G-code and Preview')}
                     </Button>
@@ -229,6 +230,7 @@ const Output: React.FC<OutputViewProps> = (props) => {
                     <Button
                         type="default"
                         priority="level-one"
+                        disabled={isOnABPosition}
                         onClick={() => {
                             actions.switchToEditPage();
                             actions.handleMouseOut();
@@ -242,6 +244,7 @@ const Output: React.FC<OutputViewProps> = (props) => {
                     <Button
                         type="default"
                         priority="level-one"
+                        disabled={isOnABPosition}
                         onClick={() => {
                             actions.showToolPathObject();
                         }}
@@ -264,7 +267,7 @@ const Output: React.FC<OutputViewProps> = (props) => {
                             <Button
                                 type="primary"
                                 priority="level-one"
-                                disabled={shouldRenderToolPaths || !hasModel || workflowState === 'running' || isGcodeGenerating || gcodeFile === null}
+                                disabled={isOnABPosition || (shouldRenderToolPaths || !hasModel || workflowState === 'running' || isGcodeGenerating || gcodeFile === null)}
                                 className={classNames(
                                     'position-absolute',
                                     // 'bottom-ne-8',

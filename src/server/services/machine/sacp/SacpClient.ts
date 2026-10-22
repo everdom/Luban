@@ -53,6 +53,7 @@ import { PeerId } from '@snapmaker/snapmaker-sacp-sdk/dist/communication/Header'
 import { MoveDirection } from '@snapmaker/snapmaker-sacp-sdk/dist/models/MovementInstruction';
 
 import DataStorage from '../../../DataStorage';
+import { MotorPowerMode } from '../../../../app/constants';
 
 interface Logger {
     error(msg: string): void;
@@ -94,6 +95,7 @@ export type RequestPhotoInfo = {
 export enum ToolHeadType {
     LASER1600mW, LASER10000mW
 }
+
 
 interface CompressUploadFileOptions {
     renderName?: string;
@@ -624,6 +626,8 @@ export default class SacpClient extends Dispatcher {
     /**
      * Get Network station state.
      *
+     * 0x01 0x26
+     *
      * Available only when network mode is NetworkMode.Station (networkConfiguration.networkMode).
      *
      * 1) network state
@@ -671,6 +675,7 @@ export default class SacpClient extends Dispatcher {
     }
 
     public async requestHome(number = 0) {
+        console.log('000000 requestHome');
         return this.send(0x01, 0x35, PeerId.CONTROLLER, Buffer.alloc(1, number)).then(({ response, packet }) => {
             return { response, packet, data: {} };
         });
@@ -678,9 +683,22 @@ export default class SacpClient extends Dispatcher {
 
     public async requestAbsoluteCooridateMove(directions: MoveDirection[] = [0], distances: number[] = [0], jogSpeed = 0.1, coordinateType: CoordinateType) {
         const paramBuffer = new MovementInstruction(undefined, undefined, jogSpeed, directions, distances, coordinateType).toArrayBuffer();
+        console.log('paramBuffer', paramBuffer);
         return this.send(0x01, 0x34, PeerId.CONTROLLER, paramBuffer, true).then(({ response, packet }) => {
             return { response, packet, data: {} };
         });
+    }
+
+    /**
+     * Get error reports.
+     *
+     * 0x04 0x02
+     */
+    public async getErrorReports() {
+        return this.send(0x04, 0x02, PeerId.CONTROLLER, Buffer.alloc(0), true)
+            .then(({ response, packet }) => {
+                return { response, packet, data: {} };
+            });
     }
 
     public async startPrint(md5: string, gcodeName: string, headType: number) {
@@ -821,6 +839,12 @@ export default class SacpClient extends Dispatcher {
 
     public async subscribeEnclosureInfo({ interval = 1000 }, callback: ResponseCallback) {
         return this.subscribe(0x15, 0xa0, interval, callback).then(({ response, packet }) => {
+            return { response, packet, data: {} };
+        });
+    }
+
+    public async subscribeEnclosureLightInfo({ interval = 1000 }, callback: ResponseCallback) {
+        return this.subscribe(0x15, 0xa1, interval, callback).then(({ response, packet }) => {
             return { response, packet, data: {} };
         });
     }
@@ -1418,6 +1442,15 @@ export default class SacpClient extends Dispatcher {
             const buffer = Buffer.concat([resourceBuffer, filenameBuffer]);
             this.send(0xad, 0x00, PeerId.CONTROLLER, buffer)
                 .catch((err) => reject(err));
+        });
+    }
+
+    // Laser
+    public async setMotorPowerHoldMode(motorPowerMode: MotorPowerMode) {
+        const buffer = Buffer.alloc(1);
+        writeUint8(buffer, 0, motorPowerMode);
+        return this.send(0x01, 0x48, PeerId.CONTROLLER, buffer).then(({ response, packet }) => {
+            return readUint8(response.data);
         });
     }
 }

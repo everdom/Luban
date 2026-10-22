@@ -5,6 +5,14 @@ import isEqual from 'lodash/isEqual';
 import noop from 'lodash/noop';
 import semver from 'semver';
 
+import {
+    SnapmakerA150Machine,
+    SnapmakerA250Machine,
+    SnapmakerA350Machine,
+    SnapmakerArtisanMachine,
+    SnapmakerOriginalMachine,
+    SnapmakerRayMachine
+} from '../../../app/machines';
 import { DEFAULT_BAUDRATE } from '../../constants';
 import EventTrigger from '../../lib/EventTrigger';
 import Feeder from '../../lib/Feeder';
@@ -156,6 +164,8 @@ class MarlinController extends EventEmitter {
         }
     };
 
+
+    seriesSize = null
 
     queryState = (() => {
         let index = 0;
@@ -368,8 +378,29 @@ class MarlinController extends EventEmitter {
             if (res.seriesSize === 'Ray2023') {
                 machineIdentifier = 'Ray';
             }
+            switch (res.seriesSize) {
+                case 'Ray2023':
+                    machineIdentifier = SnapmakerRayMachine.identifier;
+                    break;
+                case 'S':
+                    machineIdentifier = SnapmakerA150Machine.identifier;
+                    break;
+                case 'M':
+                    machineIdentifier = SnapmakerA250Machine.identifier;
+                    break;
+                case 'L':
+                    machineIdentifier = SnapmakerA350Machine.identifier;
+                    break;
+                case 'A400':
+                    machineIdentifier = SnapmakerArtisanMachine.identifier;
+                    break;
+                default:
+                    break;
+            }
 
-            this.checkMachineIsReady({ machineIdentifier });
+            if (machineIdentifier) {
+                this.checkMachineIsReady({ machineIdentifier });
+            }
 
             log.silly(`controller.on('series'): source=${this.history.writeSource},
                  line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
@@ -418,6 +449,11 @@ class MarlinController extends EventEmitter {
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER], this.history.writeSource)) {
                 this.emitAll('serialport:read', { data: res.raw });
             }
+
+            // start get real-time cnc spindle speed
+            if (includes(['CNC', '200W CNC'], res.headType)) {
+                this.writeln('M1006 L1');
+            }
         });
         this.controller.on('pos', (res) => {
             // log.silly(`controller.on('pos'): source=${this.history.writeSource},
@@ -427,10 +463,16 @@ class MarlinController extends EventEmitter {
             }
         });
         this.controller.on('temperature', (res) => {
-            // this.checkMachineIsReady();
+            if (!this.seriesSize) {
+                let machineIdentifier = '';
+                // The Original Machine does not have a seriesSize message.
+                // We use the temperature message as a symbol that the machine is ready.
+                machineIdentifier = SnapmakerOriginalMachine.identifier;
+                this.checkMachineIsReady({ machineIdentifier });
+            }
 
-            // log.silly(`controller.on('temperature'): source=${this.history.writeSource},
-            //    line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
+            log.silly(`controller.on('temperature'): source=${this.history.writeSource},
+               line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             if (includes([WRITE_SOURCE_CLIENT, WRITE_SOURCE_FEEDER, WRITE_SOURCE_SENDER], this.history.writeSource)) {
                 this.emitAll('serialport:read', { data: res.raw });
             }
@@ -461,6 +503,9 @@ class MarlinController extends EventEmitter {
                 this.writeln('M1010 S2');
             }, 1000);
         });
+        this.controller.on('cnc:highpower', (res) => {
+            // log.info(`controller.on('cnc:highpower'): source=${this.history.writeSource}, res=${JSON.stringify(res)}`);
+        });
         this.controller.on('laser10w:state', (res) => {
             if (res.laser10WErrorState !== undefined) {
                 this.emitAll('marlin:state', {
@@ -473,6 +518,30 @@ class MarlinController extends EventEmitter {
         this.controller.on('emergencyStop', () => {
             this.emergencyStop();
         });
+        this.controller.on('kits', (res) => {
+            const kits = res.kits;
+            const moduleList = [];
+            log.info(`get kits: ${res.kits}`);
+
+            kits.forEach((kit) => {
+                switch (kit) {
+                    case 'quick_change_kit': {
+                        moduleList.push({ moduleId: 519, status: true });
+                        break;
+                    }
+                    case 'reinforcement_kit': {
+                        moduleList.push({ moduleId: 522, status: true });
+                        break;
+                    }
+                    default: {
+                        log.warn('invaild kit', kit);
+                    }
+                }
+            });
+            this.emitAll('machine:module-list', { moduleList });
+        });
+
+
         this.controller.on('ok', (res) => {
             // log.silly(`controller.on('ok'): source=${this.history.writeSource}, line=${JSON.stringify(this.history.writeLine)}, res=${JSON.stringify(res)}`);
             // Display info to console, if this is from user-input
@@ -589,7 +658,6 @@ class MarlinController extends EventEmitter {
             }
 
             // Marlin settings
-
             if (this.settings !== this.controller.settings) {
                 this.settings = this.controller.settings;
                 this.emitAll('Marlin:settings', { settings: this.settings });
@@ -634,7 +702,7 @@ class MarlinController extends EventEmitter {
                     this.command(null, 'gcode:stop');
                 }
             }
-        }, 1000);
+        }, 300);
     }
 
     destroy() {
@@ -811,6 +879,8 @@ class MarlinController extends EventEmitter {
             setTimeout(() => this.writeln('M1010'), 200);
             setTimeout(() => this.writeln('M1011'), 200);
             setTimeout(() => this.writeln('M105'), 250);
+            // get crosshair offset
+            setTimeout(() => this.writeln('M2002 T8'), 300);
 
             this.handler = setInterval(() => {
                 // Set ready flag to true when receiving a start message
@@ -826,6 +896,9 @@ class MarlinController extends EventEmitter {
                 setTimeout(() => this.writeln('M1010'), 200);
                 setTimeout(() => this.writeln('M1011'), 200);
                 setTimeout(() => this.writeln('M105'), 250);
+
+                // get crosshair offset
+                setTimeout(() => this.writeln('M2002 T8'), 300);
 
                 setTimeout(() => {
                     if (this.handler && !this.ready) {
@@ -990,6 +1063,8 @@ class MarlinController extends EventEmitter {
     checkMachineIsReady({ machineIdentifier }) {
         if (!this.ready) {
             this.ready = true;
+
+            this.controller.state.series = machineIdentifier;
 
             this.emitAll('connection:connected', {
                 state: this.controller.state,

@@ -5,22 +5,30 @@ import { includes, isObject, map } from 'lodash';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
+import { controller } from '../../../communication/socket-communication';
 import { CONNECTION_STATUS_CONNECTING } from '../../../constants';
 import {
     HEAD_CNC,
     HEAD_LASER,
     HEAD_PRINTING,
     LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2,
-    MACHINE_SERIES,
+    findToolHead,
     isDualExtruder
 } from '../../../constants/machines';
 import { RootState } from '../../../flux/index.def';
 import { MachineAgent } from '../../../flux/workspace/MachineAgent';
 import connectActions from '../../../flux/workspace/actions-connect';
-import { controller } from '../../../communication/socket-communication';
+import workspaceActions from '../../../flux/workspace/index';
 import i18n from '../../../lib/i18n';
 import log from '../../../lib/log';
-import { highPower10WLaserToolHead, standardLaserToolHead } from '../../../machines/snapmaker-2-toolheads';
+import { SnapmakerOriginalExtendedMachine, SnapmakerOriginalMachine } from '../../../machines';
+import {
+    L20WLaserToolModule,
+    L2WLaserToolModule,
+    L40WLaserToolModule,
+    highPower10WLaserToolHead,
+    standardLaserToolHead
+} from '../../../machines/snapmaker-2-toolheads';
 import { laser1600mWToolHeadOriginal, laserToolHeadOriginal } from '../../../machines/snapmaker-original-toolheads';
 import { Button } from '../../components/Buttons';
 import Select from '../../components/Select';
@@ -60,6 +68,7 @@ const SerialConnection: React.FC = () => {
         heatedBedTemperature,
         emergencyStopOnline,
         workflowStatus,
+        moduleList
     } = useSelector((state: RootState) => state.workspace);
 
     // Selected port
@@ -126,6 +135,8 @@ const SerialConnection: React.FC = () => {
 
     const closePort = useCallback(() => {
         dispatch(connectActions.disconnect(selectedAgent));
+        dispatch(workspaceActions.updateState({ moduleList: [] }));
+        dispatch(workspaceActions.updateState({ laserCamera: false }));
     }, [dispatch, selectedAgent]);
 
     const actions = {
@@ -202,11 +213,36 @@ const SerialConnection: React.FC = () => {
                         status: true
                     });
                 }
+                switch (toolHead) {
+                    case L20WLaserToolModule.identifier: {
+                        newModuleStatusList.push({
+                            status: true,
+                            moduleName: i18n._('20W Laser Module')
+                        });
+                        break;
+                    }
+                    case L40WLaserToolModule.identifier: {
+                        newModuleStatusList.push({
+                            status: true,
+                            moduleName: i18n._('40W Laser Module')
+                        });
+                        break;
+                    }
+                    case L2WLaserToolModule.identifier: {
+                        newModuleStatusList.push({
+                            status: true,
+                            moduleName: i18n._('2W Laser Module')
+                        });
+                        break;
+                    }
+                    default:
+                        break;
+                }
             } else if (headType === HEAD_PRINTING) {
                 if (isDualExtruder(toolHead)) {
                     newModuleStatusList.push({
                         key: 'headtype',
-                        moduleName: i18n._('key-App/Settings/MachineSettings-Dual Extruder Toolhead'),
+                        moduleName: i18n._(findToolHead(toolHead).label),
                         status: true
                     });
                 } else {
@@ -238,7 +274,7 @@ const SerialConnection: React.FC = () => {
             });
         }
 
-        if (![MACHINE_SERIES.ORIGINAL.identifier, MACHINE_SERIES.ORIGINAL_LZ.identifier].includes(machineIdentifier)) {
+        if (![SnapmakerOriginalMachine.identifier, SnapmakerOriginalExtendedMachine.identifier].includes(machineIdentifier)) {
             airPurifier && newModuleStatusList.push({
                 key: 'airPurifier',
                 moduleName: i18n._('key-Workspace/Connection-airPurifier'),
@@ -261,6 +297,20 @@ const SerialConnection: React.FC = () => {
             });
         }
 
+        for (const moduleInfo of moduleList) {
+            if (moduleInfo.moduleId === 519) {
+                newModuleStatusList.push({
+                    moduleName: i18n._('key-Workspace/Connection-Quick Swap Kit'),
+                    status: moduleInfo.status,
+                });
+            }
+            if (moduleInfo.moduleId === 522) {
+                newModuleStatusList.push({
+                    moduleName: i18n._('key-Workspace/Connection-Bracing Kit'),
+                    status: moduleInfo.status,
+                });
+            }
+        }
         return newModuleStatusList;
     }, [
         machineIdentifier,

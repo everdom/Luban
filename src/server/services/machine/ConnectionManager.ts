@@ -49,6 +49,9 @@ import {
     SM2Instance
 } from './instances';
 import { ConnectionType } from './types';
+import SacpChannelBase from './channels/SacpChannel';
+import { L2WLaserToolModule } from '../../../app/machines/snapmaker-2-toolheads';
+import { octo } from './adaptor/Octo';
 
 const log = logger('lib:ConnectionManager');
 
@@ -132,6 +135,7 @@ class ConnectionManager {
         sstpHttpChannel.onDisconnection();
         textSerialChannel.onDisconnection(socket);
         this.scheduledTasksHandle.cancelTasks();
+        // closeServer();
     };
 
     /**
@@ -241,6 +245,18 @@ class ConnectionManager {
         }
     };
 
+    private onChannelErrorReport = async (data: { level: number; owner: number; errorCode: number }) => {
+        const { level, owner, errorCode } = data;
+
+        if (this.socket) {
+            this.socket.emit(SocketEvent.ErrorReport, {
+                level,
+                owner,
+                errorCode,
+            });
+        }
+    }
+
     private bindChannelEvents(): void {
         if (!this.channel) {
             return;
@@ -249,6 +265,7 @@ class ConnectionManager {
         this.channel.on(ChannelEvent.Connecting, this.onChannelConnecting);
         this.channel.on(ChannelEvent.Connected, this.onChannelConnected);
         this.channel.on(ChannelEvent.Ready, this.onChannelReady);
+        this.channel.on(ChannelEvent.ErrorReport, this.onChannelErrorReport);
     }
 
     private unbindChannelEvents(): void {
@@ -259,6 +276,7 @@ class ConnectionManager {
         this.channel.off(ChannelEvent.Connecting, this.onChannelConnecting);
         this.channel.off(ChannelEvent.Connected, this.onChannelConnected);
         this.channel.off(ChannelEvent.Ready, this.onChannelReady);
+        this.channel.off(ChannelEvent.ErrorReport, this.onChannelErrorReport);
     }
 
     /**
@@ -328,12 +346,15 @@ class ConnectionManager {
 
         log.info(`ConnectionOpen: type = ${connectionType}, channel = ${this.channel.constructor.name}.`);
         await this.channel.connectionOpen(options);
+        octo.onStart();
     };
 
     /**
      * Connection close.
      */
     public connectionClose = async (socket: SocketServer, options: ConnectionCloseOptions) => {
+        octo.onStop();
+
         if (!this.channel) {
             // success if no channel is used
             const result = {
@@ -345,7 +366,6 @@ class ConnectionManager {
             socket.emit('connection:close', result);
             return;
         }
-
         log.info(`Closing connection... ${this.channel.constructor.name}`);
 
         if (this.machineInstance) {
@@ -396,11 +416,11 @@ class ConnectionManager {
         const { gcode } = options;
         log.info(`executeGcode: ${gcode}`);
 
-        const success = await this.channel.executeGcode(gcode);
-        if (success) {
-            socket.emit('connection:executeGcode', { msg: '', res: null });
+        const { result, text } = await this.channel.executeGcode(gcode);
+        if (result === 0) {
+            socket.emit('connection:executeGcode', { err: null, gcode, reply: text });
         } else {
-            socket.emit('connection:executeGcode', { msg: 'Execute G-cod failed', res: null });
+            socket.emit('connection:executeGcode', { err: -1, gcode });
         }
     };
 
@@ -423,6 +443,75 @@ class ConnectionManager {
     };
 
     // Laser service
+
+    /**
+     * Turn On test laser.
+     *
+     * Turn on a trivial laser spot for set origin.
+     */
+    public turnOnTestLaser = async (socket: SocketServer) => {
+        if (includes([NetworkProtocol.SacpOverTCP, NetworkProtocol.SacpOverUDP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
+            const success = await (this.channel as SacpChannelBase).turnOnTestLaser();
+            socket.emit(SocketEvent.TurnOnTestLaser, { err: !success });
+        } else {
+            const success = await (this.channel as LaserChannelInterface).turnOnTestLaser();
+            socket.emit(SocketEvent.TurnOnTestLaser, { err: !success });
+        }
+    };
+
+    public turnOffLaser = async (socket: SocketServer) => {
+        if (includes([NetworkProtocol.SacpOverTCP, NetworkProtocol.SacpOverUDP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
+            const success = await (this.channel as SacpChannelBase).updateLaserPower(0);
+
+            socket.emit(SocketEvent.TurnOffLaser, { err: !success });
+        } else {
+            const executeResult = await this.channel.executeGcode('M5');
+
+            socket.emit(SocketEvent.TurnOffLaser, { err: executeResult.result !== 0 });
+        }
+    }
+
+    public turnOnCrosshair = async (socket: SocketServer) => {
+        log.info('Turn on crosshair');
+
+        // hard-coded for text serial channel, we have 2 implementations
+        // TODO: seperate TextSerialChannel to SM2TextSerialChannel and ArtisanTextSerialChannel?
+        if (this.channel instanceof TextSerialChannel) {
+            let gcode = '';
+
+            if (this.machineInstance instanceof SM2Instance) {
+                gcode = 'M2002 T3 P1';
+            } else {
+                gcode = 'M2000 L13 P1';
+            }
+
+            const success = await (this.channel as TextSerialChannel).executeGcode(gcode);
+            socket.emit(SocketEvent.TurnOnCrosshair, { err: !success });
+        } else {
+            const success = await (this.channel as LaserChannelInterface).turnOnCrosshair();
+            socket.emit(SocketEvent.TurnOnCrosshair, { err: !success });
+        }
+    };
+
+    public turnOffCrosshair = async (socket: SocketServer) => {
+        log.info('Turn off crosshair');
+
+        if (this.channel instanceof TextSerialChannel) {
+            let gcode = '';
+
+            if (this.machineInstance instanceof SM2Instance) {
+                gcode = 'M2002 T3 P0';
+            } else {
+                gcode = 'M2000 L13 P0';
+            }
+
+            const success = await (this.channel as TextSerialChannel).executeGcode(gcode);
+            socket.emit(SocketEvent.TurnOnCrosshair, { err: !success });
+        } else {
+            const success = await (this.channel as LaserChannelInterface).turnOffCrosshair();
+            socket.emit(SocketEvent.TurnOffCrosshair, { err: !success });
+        }
+    };
 
     public getCrosshairOffset = async (socket: SocketServer) => {
         log.info('Get crosshair offset');
@@ -462,7 +551,7 @@ class ConnectionManager {
 
     public setFireSensorSensitivity = async (socket: SocketServer, options: SetFireSensorSensitivityOptions) => {
         log.info('Set fire sensor sensitivity');
-        const sensitivity = Math.max(0, Math.min(4095, options.sensitivity));
+        const sensitivity = Math.max(0, Math.min(4096, options.sensitivity));
 
         try {
             const success = await (this.channel as LaserChannelInterface).setFireSensorSensitivity(sensitivity);
@@ -483,12 +572,11 @@ class ConnectionManager {
         if (!options.filePath.startsWith('/')) {
             options.filePath = path.resolve(`${DataStorage.tmpDir}/${options.filePath}`);
         }
-
         if (!options.targetFilename) {
             options.targetFilename = path.basename(options.filePath);
         }
 
-        log.info(`Upload file to controller... ${options.filePath} to ${options.targetFilename}`);
+        log.info(`Upload file to controller...2 ${options.filePath} to ${options.targetFilename}`);
 
         const success = await (this.channel as FileChannelInterface).uploadFile(options);
         if (success) {
@@ -564,23 +652,26 @@ class ConnectionManager {
         } = options;
 
         if (this.connectionType === ConnectionType.WiFi) {
-            const { uploadName, background, size, workPosition, originOffset } = options;
+            const { uploadName, background, size, workPosition, originOffset, useABPosition } = options;
             const gcodeFilePath = `${DataStorage.tmpDir}/${uploadName}`;
             const promises = [];
 
             if (headType === HEAD_LASER) {
                 if (includes([NetworkProtocol.SacpOverTCP], this.protocol)) {
-                    // Snapmaker Artisan (SACP)
-                    // this.socket.uploadGcodeFile(gcodeFilePath, headType, renderName, () => {
-                    // });
                     if (laserFocalLength && toolHead === LEVEL_TWO_POWER_LASER_FOR_SM2
                         && !isRotate && isLaserPrintAutoMode && materialThickness !== 0 && materialThicknessSource === AUTO_STRING) {
                         await this.channel.laseAutoSetMaterialHeight({ toolHead });
                     }
-                    if (((toolHead === LEVEL_TWO_POWER_LASER_FOR_SM2 && !isLaserPrintAutoMode)
+                    if (((includes([LEVEL_TWO_POWER_LASER_FOR_SM2, L2WLaserToolModule.identifier], toolHead) && !isLaserPrintAutoMode)
                         || (toolHead === LEVEL_ONE_POWER_LASER_FOR_SM2 && isLaserPrintAutoMode))
                         && ((materialThickness !== 0 && materialThickness !== -1) || isRotate)) {
                         await this.channel.laserSetWorkHeight({ toolHead, materialThickness, isRotate });
+
+                        // Fixme: multi call to set work orign coordinate
+                        // Camera Aid Background mode, force machine to work on machine coordinates (Origin = 0,0)
+                        if (background.enabled && !isRotate && !useABPosition) {
+                            await this.channel.setAbsoluteWorkOrigin({ x: 0, y: 0, isRotate });
+                        }
                     }
 
                     const { jogSpeed = 1500 } = options;
@@ -595,12 +686,12 @@ class ConnectionManager {
                     // SM 2.0
 
                     // Both 1.6W & 10W laser can't work without a valid focal length
-                    if (!laserFocalLength) {
+                    if (!laserFocalLength && toolHead !== L2WLaserToolModule.identifier) {
                         return;
                     }
 
                     if (!isRotate) {
-                        if (toolHead === LEVEL_TWO_POWER_LASER_FOR_SM2) {
+                        if (includes([LEVEL_TWO_POWER_LASER_FOR_SM2, L2WLaserToolModule.identifier], toolHead)) {
                             let promise;
                             if (materialThickness === -1) {
                                 promise = this.channel.executeGcode('G0 Z0 F1500;');
@@ -611,14 +702,14 @@ class ConnectionManager {
                         } else {
                             let promise;
                             if (isLaserPrintAutoMode) {
-                                promise = this.channel.executeGcode(`G53;\nG0 Z${laserFocalLength + materialThickness} F1500;\nG54;`);
+                                promise = this.channel.executeGcode(`G53;\n G0 Z${laserFocalLength + materialThickness} F1500;\n G54;`);
                             } else {
                                 promise = this.channel.executeGcode('G0 Z0 F1500;');
                             }
                             promises.push(promise);
                         }
                         // Camera Aid Background mode, force machine to work on machine coordinates (Origin = 0,0)
-                        if (background.enabled) {
+                        if (background.enabled && !useABPosition) {
                             let x = parseFloat(workPosition.x) - parseFloat(originOffset.x);
                             let y = parseFloat(workPosition.y) - parseFloat(originOffset.y);
 
@@ -645,18 +736,23 @@ class ConnectionManager {
             Promise.all(promises)
                 .then(() => {
                     this.channel.uploadGcodeFile(gcodeFilePath, headType, renderName, (msg) => {
+                        log.info('uploadGcodeFile result:' + msg);
                         if (msg) {
+                            socket.emit(SocketEvent.StartGCode, { err: 'failed', text: msg || 'Failed to upload file' });
                             // FIXME: Add abort message
                             return;
+                        } else {
+                            socket.emit(SocketEvent.StartGCode, { err: null, text: '' });
                         }
                         this.channel.startGcode(options);
                     });
                 });
         } else {
+            // Serial port
             const { workflowState } = options;
             if (includes([SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
                 if (headType === HEAD_LASER && !isRotate) {
-                    if (materialThickness !== 0) {
+                    if (materialThickness !== -1) {
                         await this.channel.laserSetWorkHeight({ toolHead, materialThickness });
                     }
                     const { gcode, jogSpeed = 1500 } = options;
@@ -682,7 +778,7 @@ class ConnectionManager {
                             });
                         } else {
                             this.channel.command(socket, {
-                                args: [`G53;\nG0 Z${materialThickness + laserFocalLength} ;\nG54;`, null]
+                                args: [['G53', `G0 Z${materialThickness + laserFocalLength}`, 'G54'], null]
                             });
                         }
                     } else {
@@ -691,11 +787,12 @@ class ConnectionManager {
                         });
                     }
                 }
+                // Fixme: setTimeout cause some commands to be dropped
                 setTimeout(() => {
                     this.channel.command(socket, {
                         cmd: 'gcode:start',
                     });
-                }, 100);
+                }, 200);
                 socket && socket.emit(eventName, {});
             }
         }
@@ -805,7 +902,7 @@ M3`;
             this.channel.command(socket, {
                 cmd: 'gcode:pause',
             });
-            socket && socket.emit(eventName, {});
+            socket && socket.emit(eventName, { err: true });
         }
     };
 
@@ -960,36 +1057,6 @@ M3`;
                 this.executeGcode(
                     socket,
                     { gcode: 'M500' }
-                );
-            }
-        }
-    };
-
-    public switchLaserPower = (socket, options) => {
-        const { isSM2, laserPower, laserPowerOpen } = options;
-        if (includes([NetworkProtocol.SacpOverTCP, NetworkProtocol.SacpOverUDP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
-            if (laserPowerOpen) {
-                this.channel.updateLaserPower(0);
-            } else {
-                this.channel.updateLaserPower(laserPower);
-            }
-            return;
-        }
-        if (laserPowerOpen) {
-            this.executeGcode(
-                socket,
-                { gcode: 'M5' } // M3 P0 S0
-            );
-        } else {
-            if (isSM2) {
-                this.executeGcode(
-                    socket,
-                    { gcode: 'M3 P1 S2.55' }
-                );
-            } else {
-                this.executeGcode(
-                    socket,
-                    { gcode: `M3 P${laserPower} S${laserPower * 255 / 100}` }
                 );
             }
         }
@@ -1211,12 +1278,16 @@ M3`;
     public setMatrix = (params, callback) => {
         this.channel.setMatrix(params, callback);
     };
-    // only for Wifi
+    // only for Wifi end
+
+    //
+    //  other
+    //
 
     public goHome = async (socket, options, callback) => {
         const { headType } = options;
-        if (includes([NetworkProtocol.SacpOverTCP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
-            this.channel.goHome();
+        if (includes([NetworkProtocol.SacpOverTCP, SerialPortProtocol.SacpOverSerialPort, NetworkProtocol.SacpOverUDP], this.protocol)) {
+            this.channel.goHome(headType);
             socket && socket.emit('move:status', { isHoming: true });
         } else {
             await this.executeGcode(socket, { gcode: 'G53' });
@@ -1237,6 +1308,11 @@ M3`;
     public coordinateMove = async (socket, options, callback) => {
         const { moveOrders, gcode, jogSpeed, headType } = options;
         // const { moveOrders, gcode, context, cmd, jogSpeed, headType } = options;
+
+        if (gcode) {
+            log.info(`Coordinate move G-code:\n${gcode}`);
+        }
+
         if (includes([NetworkProtocol.SacpOverTCP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
             this.channel.coordinateMove({ moveOrders, jogSpeed, headType });
         } else {
@@ -1250,13 +1326,18 @@ M3`;
         if (includes([NetworkProtocol.SacpOverTCP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
             this.channel.setWorkOrigin({ xPosition, yPosition, zPosition, bPosition });
         } else {
-            await this.executeGcode(socket, { gcode: 'G92 X0 Y0 Z0 B0' });
+            let gcode = 'G92 ';
+            xPosition && (gcode += `X${xPosition || 0} `);
+            yPosition && (gcode += `Y${yPosition || 0}  `);
+            zPosition && (gcode += `Z${zPosition || 0} `);
+            bPosition && (gcode += `B${bPosition || 0} `);
+            await this.executeGcode(socket, { gcode });
             callback && callback();
         }
     };
 
     public setSpindleSpeed = async (socket: SocketServer, options) => {
-        if (includes([NetworkProtocol.SacpOverTCP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
+        if (includes([NetworkProtocol.SacpOverTCP, NetworkProtocol.HTTP, SerialPortProtocol.SacpOverSerialPort, SerialPortProtocol.PlainText], this.protocol)) {
             const { speed } = options;
             const success = await (this.channel as CncChannelInterface).setSpindleSpeed(speed);
 
@@ -1296,6 +1377,17 @@ M3`;
             sstpHttpChannel.wifiStatusTest(options);
         }
     }
+
+    public setMotorPowerMode = async (socket: SocketServer, options) => {
+        const { eventName, setMotorPowerHoldMod } = options;
+        if (includes([NetworkProtocol.SacpOverTCP, NetworkProtocol.SacpOverUDP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
+            const result = await (this.channel as SystemChannelInterface).setMotorPowerMode(setMotorPowerHoldMod);
+            console.log('setMotorPowerMode result:', result, eventName);
+            socket.emit(eventName, { result });
+        }
+    }
+
+
 
     //
     // - Machine Network
@@ -1390,13 +1482,16 @@ M3`;
         }
     };
 
+    /**
+     * Get firmware version.
+     */
     public getFirmwareVersion = async (socket: SocketServer) => {
         if (includes([NetworkProtocol.SacpOverTCP, NetworkProtocol.SacpOverUDP, SerialPortProtocol.SacpOverSerialPort], this.protocol)) {
             const version = await (this.channel as SystemChannelInterface).getFirmwareVersion();
             socket.emit(SocketEvent.GetFirmwareVersion, { err: 0, version });
         } else {
             // not supported
-            socket.emit(SocketEvent.UpgradeFirmware, { err: 1 });
+            socket.emit(SocketEvent.GetFirmwareVersion, { err: 1 });
         }
     }
 

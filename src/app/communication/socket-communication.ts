@@ -64,10 +64,11 @@ class SocketCommunication {
         'transfer:hex': [],
         'move:status': [],
         'connection:headBeginWork': [],
-        'manager:error': [],
+        [SocketEvent.ErrorReport]: [],
 
         // machine related
         'machine:module-list': [],
+        'machine:module-info': [],
         'machine:laser-status': [],
 
         [SocketEvent.UploadFileProgress]: [],

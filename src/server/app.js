@@ -22,6 +22,7 @@ import path from 'path';
 import rangeCheck from 'range_check';
 import favicon from 'serve-favicon';
 import sessionFileStore from 'session-file-store';
+
 import settings from './config/settings';
 import { ERR_FORBIDDEN, ERR_UNAUTHORIZED, IP_WHITELIST } from './constants';
 import DataStorage from './DataStorage';
@@ -198,7 +199,10 @@ const createApplication = () => {
     i18next
         .use(i18nextBackend)
         .use(i18nextHttpMiddleware.LanguageDetector)
-        .init(settings.i18next);
+        .init({
+            lng: config.get('language', undefined), // use saved lang
+            ...settings.i18next
+        });
 
     // app.use(i18nextHandle(i18next, {}));
     app.use(i18nextHttpMiddleware.handle(i18next));

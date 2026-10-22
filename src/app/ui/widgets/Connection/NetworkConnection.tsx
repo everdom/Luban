@@ -22,6 +22,7 @@ import {
     LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2,
     LEVEL_TWO_POWER_LASER_FOR_SM2,
     findMachineByName,
+    findToolHead,
     isDualExtruder
 } from '../../../constants/machines';
 import { RootState } from '../../../flux/index.def';
@@ -33,7 +34,7 @@ import { ConnectionType } from '../../../flux/workspace/state';
 import usePrevious from '../../../lib/hooks/previous';
 import i18n from '../../../lib/i18n';
 import log from '../../../lib/log';
-import { L20WLaserToolModule, L40WLaserToolModule } from '../../../machines/snapmaker-2-toolheads';
+import { L20WLaserToolModule, L2WLaserToolModule, L40WLaserToolModule } from '../../../machines/snapmaker-2-toolheads';
 import { Button } from '../../components/Buttons';
 import ModalSmall from '../../components/Modal/ModalSmall';
 import ModalSmallInput from '../../components/Modal/ModalSmallInput';
@@ -151,6 +152,7 @@ const NetworkConnection: React.FC = () => {
         moduleList,
         moduleStatusList,
         airPurifier,
+        airPurifierHasPower,
         heatedBedTemperature,
         laserCamera,
     } = useSelector((state: RootState) => state.workspace, shallowEqual);
@@ -355,6 +357,8 @@ const NetworkConnection: React.FC = () => {
     const disconnect = useCallback(() => {
         if (server) {
             dispatch(connectActions.disconnect(server));
+            dispatch(workspaceActions.updateState({ moduleList: [] }));
+            dispatch(workspaceActions.updateState({ laserCamera: false }));
         }
     }, [dispatch, server]);
 
@@ -497,7 +501,7 @@ const NetworkConnection: React.FC = () => {
         if (headType === HEAD_PRINTING) {
             if (isDualExtruder(toolHead)) {
                 newModuleStatusList.push({
-                    moduleName: i18n._('key-App/Settings/MachineSettings-Dual Extruder Toolhead'),
+                    moduleName: i18n._(findToolHead(toolHead).label),
                     status: true
                 });
             } else {
@@ -532,6 +536,13 @@ const NetworkConnection: React.FC = () => {
                         newModuleStatusList.push({
                             status: true,
                             moduleName: i18n._('40W Laser Module')
+                        });
+                        break;
+                    }
+                    case L2WLaserToolModule.identifier: {
+                        newModuleStatusList.push({
+                            status: true,
+                            moduleName: i18n._(L2WLaserToolModule.label)
                         });
                         break;
                     }
@@ -570,16 +581,8 @@ const NetworkConnection: React.FC = () => {
             if (moduleStatusList[key]) {
                 newModuleStatusList.push({
                     moduleName: i18n._(`key-Workspace/Connection-${key}`),
-                    status: moduleStatusList[key]
+                    status: key === 'airPurifier' ? airPurifierHasPower : moduleStatusList[key]
                 });
-            } else {
-                // compatible code
-                if (key === 'airPurifier' && airPurifier) {
-                    newModuleStatusList.push({
-                        moduleName: i18n._('key-Workspace/Connection-airPurifier'),
-                        status: moduleStatusList[key]
-                    });
-                }
             }
         });
 
@@ -587,6 +590,12 @@ const NetworkConnection: React.FC = () => {
             if (moduleInfo.moduleId === 519) {
                 newModuleStatusList.push({
                     moduleName: i18n._('key-Workspace/Connection-Quick Swap Kit'),
+                    status: moduleInfo.status,
+                });
+            }
+            if (moduleInfo.moduleId === 522) {
+                newModuleStatusList.push({
+                    moduleName: i18n._('key-Workspace/Connection-Bracing Kit'),
                     status: moduleInfo.status,
                 });
             }
@@ -602,6 +611,7 @@ const NetworkConnection: React.FC = () => {
         toolHead,
         emergencyStopButtonStatus,
         airPurifier,
+        airPurifierHasPower,
         airPurifierStatus,
         rotaryModuleStatus,
         enclosureStatus,
@@ -647,7 +657,6 @@ const NetworkConnection: React.FC = () => {
                             <SvgIcon
                                 className={classNames(
                                     'border-default-black-5 border-radius-left-8',
-                                    // className="border-default-black-5 border-radius-right-8"
                                 )}
                                 name="Add"
                                 title={i18n._('key-Workspace/Connection-Add')}

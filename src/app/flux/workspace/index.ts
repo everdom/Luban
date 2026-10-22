@@ -1,11 +1,13 @@
 import { WorkflowStatus } from '@snapmaker/luban-platform';
 import { includes, isEmpty, isNil, isUndefined } from 'lodash';
-import * as THREE from 'three';
-import { Box3, Vector3 } from 'three';
-import { v4 as uuid } from 'uuid';
+import {
+    Box3,
+    Vector3
+} from 'three';
 
 import { generateRandomPathName } from '../../../shared/lib/random-utils';
 import api from '../../api';
+import { controller } from '../../communication/socket-communication';
 import SocketEvent from '../../communication/socket-events';
 import {
     CONNECTION_GET_GCODEFILE,
@@ -13,37 +15,34 @@ import {
     CONNECTION_STATUS_CONNECTED,
     CONNECTION_STATUS_IDLE,
     CONNECTION_STATUS_REQUIRE_AUTH,
-    EPSILON,
     HEAD_CNC,
     HEAD_LASER,
     HEAD_PRINTING,
     LASER_MOCK_PLATE_HEIGHT,
     LEFT_EXTRUDER,
-    PROTOCOL_TEXT,
-    RIGHT_EXTRUDER,
+    RIGHT_EXTRUDER
 } from '../../constants';
 import {
     EMERGENCY_STOP_BUTTON,
+    LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2,
     MACHINE_SERIES,
+    MODULEID_TOOLHEAD_MAP,
     findMachineByName,
     findToolHead,
 } from '../../constants/machines';
 import { valueOf } from '../../lib/contants-utils';
-import { controller } from '../../communication/socket-communication';
-import { logGcodeExport } from '../../lib/gaEvent';
 import log from '../../lib/log';
-import workerManager from '../../lib/manager/workerManager';
 import { SnapmakerOriginalMachine } from '../../machines';
-import ThreeUtils from '../../scene/three-extensions/ThreeUtils';
 import { machineStore } from '../../store/local-storage';
-import gcodeBufferGeometryToObj3d from '../../workers/GcodeToBufferGeometry/gcodeBufferGeometryToObj3d';
 import { MachineAgent } from './MachineAgent';
 import baseActions, { ACTION_UPDATE_STATE } from './actions-base';
 import connectActions from './actions-connect';
 import discoverActions from './actions-discover';
-import { GCodeFileObject } from './actions-gcode';
+import gcodeActions from './actions-gcode';
 import type { MachineStateUpdateOptions } from './state';
-import { ConnectionType, WORKSPACE_STAGE, initialState } from './state';
+import { initialState } from './state';
+import { GCodeFileMetadata } from './types';
+import { STANDARD_CNC_TOOLHEAD_FOR_SM2 } from '../../machines/snapmaker-2-toolheads';
 
 
 export { WORKSPACE_STAGE } from './state';
@@ -96,6 +95,14 @@ export const actions = {
      * Handing of remote events.
      */
     __initRemoteEvents: () => (dispatch, getState) => {
+        const compareAndSet = (obj: object, compareObj: object, key: string, value: boolean | number | string) => {
+            if (isNil(value)) {
+                return;
+            }
+            if (value !== compareObj[key]) {
+                obj[key] = value;
+            }
+        };
         const controllerEvents = {
             // connecting state from remote
             [SocketEvent.ConnectionConnecting]: (options: { requireAuth?: boolean }) => {
@@ -126,19 +133,25 @@ export const actions = {
                     moduleStatusList,
                     isHomed = false,
                     isMoving,
+                    isRayNewVersion
                 } = state;
                 const { seriesSize } = state;
 
                 dispatch(baseActions.updateState({
                     isHomed: isHomed,
                     isMoving,
+                    isRayNewVersion
                 }));
 
                 if (!isNil(seriesSize)) {
+                    log.debug('seriesSize =', seriesSize);
                     machineSeries = valueOf(MACHINE_SERIES, 'alias', `${series}-${seriesSize}`)
                         ? valueOf(MACHINE_SERIES, 'alias', `${series}-${seriesSize}`).value
                         : null;
-                    dispatch(actions.loadGcode());
+
+                    machineSeries = series;
+
+                    dispatch(gcodeActions.loadGcode());
                 } else {
                     const _isRotate = moduleStatusList?.rotaryModule || false;
                     const emergency = moduleStatusList?.emergencyStopButton;
@@ -156,6 +169,22 @@ export const actions = {
                     }));
                     machineSeries = series;
                 }
+
+                if (!isNil(moduleStatusList)) {
+                    const data = {};
+                    const currentState = getState().workspace;
+                    const enclosureOnline = moduleStatusList.enclosure;
+                    const rotateModuleOnline = moduleStatusList.rotateModuleOnline;
+                    const airPurifier = moduleStatusList.airPurifier;
+
+                    compareAndSet(data, currentState, 'moduleStatusList', moduleStatusList);
+                    compareAndSet(data, currentState, 'enclosureOnline', enclosureOnline);
+                    compareAndSet(data, currentState, 'rotateModuleOnline', rotateModuleOnline);
+                    compareAndSet(data, currentState, 'airPurifier', airPurifier);
+
+                    dispatch(baseActions.updateState(data));
+                }
+
 
                 log.info(`machine = ${machineSeries}`);
                 log.info(`tool = ${toolHead}`);
@@ -183,7 +212,7 @@ export const actions = {
                                 } else if (headType === HEAD_CNC) {
                                     suffix = 'cnc';
                                 }
-                                dispatch(actions.clearGcode());
+                                dispatch(gcodeActions.clearGcode());
                                 dispatch(
                                     actions.renderGcode(
                                         `print.${suffix}`,
@@ -261,15 +290,6 @@ export const actions = {
                 // Note: serialPort & Wifi -> for heartBeat
                 const { state } = options;
                 const { headType, pos, originOffset, headStatus, headPower, temperature, zFocus, isHomed, zAxisModule, laser10WErrorState } = state;
-
-                const compareAndSet = (obj: object, compareObj: object, key: string, value: boolean | number | string) => {
-                    if (isNil(value)) {
-                        return;
-                    }
-                    if (value !== compareObj[key]) {
-                        obj[key] = value;
-                    }
-                };
 
                 const data = {};
 
@@ -388,7 +408,8 @@ export const actions = {
                     fileName,
                     ledValue,
                     fanLevel,
-                    isDoorEnable
+                    isDoorEnable,
+                    crosshairOffset
                 } = state;
 
                 compareAndSet(data, currentState, 'laser10WErrorState', laser10WErrorState);
@@ -415,6 +436,7 @@ export const actions = {
                 } else if (!isNil(zFocus)) {
                     compareAndSet(data, currentState, 'laserFocalLength', zFocus + LASER_MOCK_PLATE_HEIGHT);
                 }
+
                 if (!isNil(laserPower)) {
                     compareAndSet(data, currentState, 'laserPower', laserPower);
                 } else if (!isNil(headPower)) {
@@ -470,7 +492,6 @@ export const actions = {
                     compareAndSet(data, currentState, 'airPurifierFanSpeed', airPurifierFanSpeed);
                     compareAndSet(data, currentState, 'airPurifierFilterHealth', airPurifierFilterHealth);
                 }
-
                 dispatch(baseActions.updateState(data));
 
                 // TODO: wifi emergencyStop goes there
@@ -482,6 +503,12 @@ export const actions = {
                     );
                     dispatch(connectActions.disconnect(currentState.server));
                 }
+
+                crosshairOffset && dispatch(
+                    baseActions.updateState({
+                        crosshairOffset
+                    })
+                );
             },
 
             /**
@@ -490,11 +517,63 @@ export const actions = {
              *   { key: 7, moduleId: 1500, status: true },
              * ]
              */
+            // Only works for SM 2.0
             'machine:module-list': (options) => {
                 const moduleList = options.moduleList;
 
                 dispatch(actions.updateState({
                     moduleList,
+                }));
+            },
+
+            /**
+             * moduleInfo: [
+             *   { key: 1, spindleSpeed: 0 },
+             *   {
+             *     key: 3,
+             *     isReady: true,
+             *     led: 100,
+             *     fan: 0,
+             *     isDoorEnabled: true,
+             *     isEnclosureDoorOpen: false,
+             *     doorSwitchCount: 0
+             *   },
+             *   { key: 7, quickSwapState: 1, quickSwapType: 1 }
+             * ]
+             */
+            // Only works for SM 2.0
+            'machine:module-info': (options) => {
+                const moduleInfo = options.moduleInfo;
+                const moduleList: Array<any> = getState().workspace.moduleList;
+
+                const newModuleList = moduleInfo.map(m => {
+                    const targetModule = moduleList.find(v => v.key === m.key);
+                    if (!targetModule) {
+                        return m;
+                    }
+                    return {
+                        ...targetModule,
+                        ...m
+                    };
+                });
+                dispatch(actions.updateState({
+                    moduleList: newModuleList,
+                }));
+
+                // Update for laserFocalLength
+                moduleList.forEach(m => {
+                    if (m.laserFocalLength) {
+                        dispatch(actions.updateState({
+                            laserFocalLength: m.laserFocalLength,
+                        }));
+                    }
+                });
+
+                // update cnc spindleSpeed
+                const CNCToolHead = moduleList.find(m => MODULEID_TOOLHEAD_MAP[m.moduleId] === LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2
+                    || MODULEID_TOOLHEAD_MAP[m.moduleId] === STANDARD_CNC_TOOLHEAD_FOR_SM2);
+                CNCToolHead && dispatch(actions.updateState({
+                    cncCurrentSpindleSpeed: CNCToolHead.spindleSpeed,
                 }));
             },
 
@@ -579,12 +658,10 @@ export const actions = {
                     }));
                 }
             },
-            'manager:error': (options) => {
-                log.warn('REFACTOR manager:error');
+            [SocketEvent.ErrorReport]: (options) => {
                 const { owner, errorCode } = options;
                 if (includes(EMERGENCY_STOP_BUTTON, owner)) {
                     if (errorCode === 1) {
-                        // TODO
                         controller.emitEvent(SocketEvent.ConnectionClose, () => {
                             dispatch(connectActions.resetMachineState());
                             dispatch(actions.updateMachineState({
@@ -612,133 +689,6 @@ export const actions = {
         }
     },
 
-    gcodeToArraybufferGeometryCallback: (data) => (dispatch, getState) => {
-        const {
-            status,
-            value,
-            renderMethod,
-            isDone,
-            gcodeFilename,
-            isPreview = false,
-        } = data;
-        switch (status) {
-            case 'succeed': {
-                const { modelGroup, previewModelGroup } = getState().workspace;
-                const boundingBox: Box3 = getState().workspace.boundingBox;
-                const { positions, colors, index, indexColors } = value;
-                const bufferGeometry = new THREE.BufferGeometry();
-                const positionAttribute = new THREE.Float32BufferAttribute(
-                    positions.send,
-                    3
-                );
-                const indexAttribute = new THREE.Float32BufferAttribute(
-                    index.send,
-                    1
-                );
-                const colorAttribute = new THREE.Uint8BufferAttribute(
-                    colors.send,
-                    3
-                );
-                const indexColorAttribute = new THREE.Uint8BufferAttribute(
-                    indexColors.send,
-                    3
-                );
-                // this will map the buffer values to 0.0f - +1.0f in the shader
-                colorAttribute.normalized = true;
-                indexColorAttribute.normalized = true;
-
-                bufferGeometry.setAttribute('position', positionAttribute);
-                bufferGeometry.setAttribute('a_color', colorAttribute);
-                bufferGeometry.setAttribute('a_index', indexAttribute);
-                bufferGeometry.setAttribute(
-                    'a_index_color',
-                    indexColorAttribute
-                );
-
-                const object3D = gcodeBufferGeometryToObj3d(
-                    'WORKSPACE',
-                    bufferGeometry,
-                    renderMethod
-                );
-                // object3D.material.uniforms.u_visible_index_count.value = 20000;
-                object3D.name = `${gcodeFilename}-${uuid()}`;
-
-                // Add object3D to one of group
-                if (isPreview) {
-                    previewModelGroup.add(object3D);
-                } else {
-                    modelGroup.add(object3D);
-                }
-                object3D.position.copy(new THREE.Vector3());
-
-                // calculate bounding box of G-code objects
-                const objectBBox = ThreeUtils.computeBoundingBox(object3D);
-
-                const newBoundingBox = new Box3();
-                if (boundingBox) {
-                    newBoundingBox.copy(boundingBox);
-                }
-                newBoundingBox.expandByPoint(objectBBox.min);
-                newBoundingBox.expandByPoint(objectBBox.max);
-
-                if (isPreview) {
-                    dispatch(
-                        actions.updateState({
-                            previewBoundingBox: newBoundingBox,
-                        })
-                    );
-                } else {
-                    dispatch(
-                        actions.updateState({
-                            boundingBox: newBoundingBox,
-                        })
-                    );
-                }
-
-                if (isDone) {
-                    if (isPreview) {
-                        dispatch(
-                            actions.updateState({
-                                previewRenderState: 'rendered',
-                                previewStage: WORKSPACE_STAGE.LOAD_GCODE_SUCCEED,
-                            })
-                        );
-                    } else {
-                        dispatch(
-                            actions.updateState({
-                                renderState: 'rendered',
-                                stage: WORKSPACE_STAGE.LOAD_GCODE_SUCCEED,
-                            })
-                        );
-                    }
-                }
-
-                dispatch(actions.render());
-                break;
-            }
-            case 'progress': {
-                const state = getState().printing;
-                if (value - state.progress > 0.01 || value > 1 - EPSILON) {
-                    !isPreview
-                        && dispatch(actions.updateState({ progress: value }));
-                }
-                break;
-            }
-            case 'err': {
-                dispatch(
-                    actions.updateState({
-                        renderState: 'idle',
-                        stage: WORKSPACE_STAGE.LOAD_GCODE_FAILED,
-                        progress: 1,
-                    })
-                );
-                break;
-            }
-            default:
-                break;
-        }
-    },
-
     setGcodePrintingIndex: (index) => (dispatch, getState) => {
         const { modelGroup } = getState().workspace;
         for (const children of modelGroup.children) {
@@ -751,14 +701,6 @@ export const actions = {
             type: ACTION_SET_STATE,
             state,
         };
-    },
-
-    render: () => (dispatch) => {
-        dispatch(
-            actions.updateState({
-                renderingTimestamp: +new Date(),
-            })
-        );
     },
 
     /**
@@ -778,7 +720,7 @@ export const actions = {
             .then((res) => {
                 const response = res.body;
                 const header = response.gcodeHeader;
-                const gcodeFile: GCodeFileObject = {
+                const gcodeFile: GCodeFileMetadata = {
                     name: file.name,
                     uploadName: response.uploadName,
                     size: file.size,
@@ -809,10 +751,25 @@ export const actions = {
                     nozzle_1_temperature: header[';nozzle_1_temperature(°C)'],
                     jog_speed: header[';jog_speed(mm/minute)'],
                     power: header[';power(%)'],
+                    is_rotate: header[';is_rotate'] === 'true',
+                    gcodeAxisWorkRange: {
+                        max: {
+                            x: header[';max_x(mm)'],
+                            y: header[';max_y(mm)'],
+                            z: header[';max_z(mm)'],
+                            b: header[';max_b(mm)']
+                        },
+                        min: {
+                            x: header[';min_x(mm)'],
+                            y: header[';min_y(mm)'],
+                            z: header[';min_z(mm)'],
+                            b: header[';min_b(mm)']
+                        }
+                    }
                 };
-                dispatch(actions.addGcodeFiles(gcodeFile));
+                dispatch(gcodeActions.addGCodeFile(gcodeFile));
                 shouldAutoPreviewGcode
-                    && dispatch(actions.renderPreviewGcodeFile(gcodeFile));
+                    && dispatch(gcodeActions.renderPreviewGcodeFile(gcodeFile));
             })
             .catch(() => {
                 // Ignore error
@@ -848,30 +805,11 @@ export const actions = {
                     thumbnail: header[';thumbnail'] || '',
                     renderGcodeFileName: file.renderGcodeFileName || file.name,
                 };
-                dispatch(actions.renderGcodeFile(gcodeFile));
+                dispatch(gcodeActions.renderGcodeFile(gcodeFile));
             })
             .catch(() => {
                 // Ignore error
             });
-    },
-
-    clearGcode: (isPreview = false) => (dispatch, getState) => {
-        const { modelGroup, previewModelGroup } = getState().workspace;
-        if (isPreview) {
-            previewModelGroup.remove(...previewModelGroup.children);
-        } else {
-            modelGroup.remove(...modelGroup.children);
-        }
-        dispatch(
-            actions.updateState({
-                renderState: 'idle',
-                gcodeFile: null,
-                boundingBox: new Box3(),
-                stage: WORKSPACE_STAGE.EMPTY,
-                progress: 0,
-            })
-        );
-        dispatch(actions.render());
     },
 
     // updateGcodeFilename: (name, x = 0, y = 0, z = 0) => (dispatch, getState) => {
@@ -896,7 +834,7 @@ export const actions = {
     renderGcode: (name, gcode, shouldRenderGcode = false, isRepeat = false) => (
         dispatch
     ) => {
-        dispatch(actions.clearGcode());
+        dispatch(gcodeActions.clearGcode());
         const blob = new Blob([gcode], { type: 'text/plain' });
         const file = new File([blob], name);
 
@@ -912,125 +850,9 @@ export const actions = {
                 thumbnail: '',
             };
             dispatch(
-                actions.renderGcodeFile(gcodeFile, !isRepeat, shouldRenderGcode)
+                gcodeActions.renderGcodeFile(gcodeFile, !isRepeat, shouldRenderGcode)
             );
         });
-    },
-
-    renderGcodeFile: (
-        gcodeFile: GCodeFileObject,
-        needToList = true,
-        shouldRenderGcode = false
-    ) => async (dispatch, getState) => {
-        const { shouldAutoPreviewGcode } = getState().machine;
-        const { headType, isRotate } = getState().workspace;
-
-        // const oldGcodeFile = getState().workspace.gcodeFile;
-        if (needToList) {
-            dispatch(actions.addGcodeFiles(gcodeFile));
-        }
-        // if (oldGcodeFile !== null && oldGcodeFile.uploadName === gcodeFile.uploadName) {
-        //     return;
-        // }
-        if (shouldRenderGcode) {
-            await dispatch(actions.clearGcode());
-            await dispatch(
-                actions.updateState({
-                    gcodeFile,
-                    stage: WORKSPACE_STAGE.LOADING_GCODE,
-                    renderState: 'rendering',
-                    progress: 0,
-                })
-            );
-            // TODO:  used for serialport
-            await dispatch(actions.loadGcode(gcodeFile));
-            logGcodeExport(headType, 'workspace', isRotate);
-
-            workerManager.gcodeToArraybufferGeometry(
-                {
-                    func: 'WORKSPACE',
-                    gcodeFilename: gcodeFile.uploadName
-                },
-                (data) => {
-                    // Note this callback can be called multiple times.
-                    dispatch(actions.gcodeToArraybufferGeometryCallback(data));
-                }
-            );
-        } else {
-            if (shouldAutoPreviewGcode) {
-                dispatch(actions.renderPreviewGcodeFile(gcodeFile));
-            }
-
-            if (gcodeFile.boundingBox) {
-                await dispatch(
-                    actions.updateState({
-                        boundingBox: new Box3(
-                            new Vector3().copy(gcodeFile.boundingBox.min),
-                            new Vector3().copy(gcodeFile.boundingBox.max),
-                        ),
-                    })
-                );
-            }
-        }
-    },
-
-    renderPreviewGcodeFile: (gcodeFile) => async (dispatch) => {
-        await dispatch(actions.clearGcode(true));
-        dispatch(
-            actions.updateState({
-                previewStage: WORKSPACE_STAGE.LOADING_GCODE,
-                previewRenderState: 'rendering',
-                progress: 0,
-            })
-        );
-        workerManager.gcodeToArraybufferGeometry(
-            {
-                func: 'WORKSPACE',
-                gcodeFilename: gcodeFile.uploadName,
-                isPreview: true,
-            },
-            (data) => {
-                dispatch(actions.gcodeToArraybufferGeometryCallback(data));
-            }
-        );
-    },
-
-    addGcodeFiles: (fileInfo) => (dispatch, getState) => {
-        const { gcodeFiles } = getState().workspace;
-        const files = [];
-        fileInfo.isRenaming = false;
-        fileInfo.newName = fileInfo.name;
-        files.push(fileInfo);
-
-        let added = 1,
-            i = 0;
-        while (added < 5 && i < gcodeFiles.length) {
-            const gcodeFile = gcodeFiles[i];
-            // G-code file with the same uploadName will be replaced with current one
-            if (gcodeFile.uploadName !== fileInfo.uploadName) {
-                files.push(gcodeFile);
-                added++;
-            }
-            i++;
-        }
-
-        dispatch(
-            actions.updateState({
-                gcodeFiles: files,
-            })
-        );
-
-        if (fileInfo.boundingBox) {
-            dispatch(
-                actions.updateState({
-                    boundingBox: new Box3(
-                        new Vector3().fromArray(fileInfo.boundingBox.min),
-                        new Vector3().fromArray(fileInfo.boundingBox.max),
-                    ),
-                    gcodeFiles: files,
-                })
-            );
-        }
     },
 
     renameGcodeFile: (uploadName, newName = null, isRenaming = null) => (
@@ -1073,45 +895,6 @@ export const actions = {
         );
     },
 
-    /**
-     * Tell controller to load G-code.
-     *
-     * @param gcodeFile An object that contains information of G-code file.
-     * @returns {Promise}
-     */
-    loadGcode: (gcodeFile = null) => async (dispatch, getState) => {
-        const { connectionStatus } = getState().workspace;
-        const connectionType: ConnectionType = getState().workspace.connectionType;
-
-        gcodeFile = gcodeFile || getState().workspace.gcodeFile;
-
-        if (connectionType === ConnectionType.WiFi) {
-            // Actually only with serial port plaintext protocol need to load G-code
-            return;
-        }
-
-        if (connectionStatus !== CONNECTION_STATUS_CONNECTED || gcodeFile === null) {
-            return;
-        }
-
-        const machineAgent: MachineAgent = getState().workspace.server;
-
-        dispatch(actions.updateState({ uploadState: 'uploading' }));
-        try {
-            await api.loadGCode({
-                port: machineAgent?.port,
-                dataSource: PROTOCOL_TEXT,
-                uploadName: gcodeFile.uploadName,
-            });
-
-            dispatch(actions.updateState({ uploadState: 'uploaded' }));
-        } catch (e) {
-            dispatch(actions.updateState({ uploadState: 'idle' }));
-
-            log.error('Failed to upload G-code to controller');
-        }
-    },
-
     unloadGcode: () => (dispatch) => {
         // dispatch(actions.executeCmd('gcode:unload'));
         dispatch(actions.updateState({ uploadState: 'idle' }));
@@ -1146,6 +929,9 @@ export const actions = {
 
         dispatch(actions.updateState(options));
     },
+    updateMoving: (isMoving: boolean) => (dispatch) => {
+        dispatch(baseActions.updateState({ isMoving }));
+    },
 
     executeCmd: (cmd: string) => {
         console.log('execute cmd', cmd);
@@ -1155,7 +941,7 @@ export const actions = {
     /**
      * Execute G-code.
      */
-    executeGcode: (gcode: string, context = null, cmd = undefined) => (dispatch, getState) => {
+    executeGcode: (gcode: string, context = null, cmd = undefined, cb?: Function) => (dispatch, getState) => {
         const { homingModal, isConnected } = getState().workspace;
         if (!isConnected) {
             if (homingModal) {
@@ -1178,6 +964,7 @@ export const actions = {
                         })
                     );
                 }
+                cb && typeof cb === 'function' && cb();
             }
         );
     },

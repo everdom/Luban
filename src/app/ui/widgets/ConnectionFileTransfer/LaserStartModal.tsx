@@ -1,5 +1,5 @@
-import { Tooltip } from 'antd';
-import { isString, isUndefined } from 'lodash';
+import { Alert, Tooltip } from 'antd';
+import { includes, isString, isUndefined, round } from 'lodash';
 import PropTypes from 'prop-types';
 import React, { useEffect, useState } from 'react';
 import { Trans } from 'react-i18next';
@@ -12,31 +12,70 @@ import { Button } from '../../components/Buttons';
 import { NumberInput as Input } from '../../components/Input';
 import Modal from '../../components/Modal';
 import { Radio } from '../../components/Radio';
+import { L20WLaserToolModule, L2WLaserToolModule, L40WLaserToolModule, highPower10WLaserToolHead, standardLaserToolHead } from '../../../machines/snapmaker-2-toolheads';
+import { SnapmakerA150Machine, SnapmakerA250Machine, SnapmakerA350Machine } from '../../../machines';
+import { ConnectionType } from '../../../flux/workspace/state';
 
-function LaserStartModal({
+
+interface LaserStartModalProps {
+    showStartModal: boolean;
+    toolHeadIdentifier: string;
+    isHeightPower: boolean;
+    isRotate: boolean;
+    isSerialConnect: boolean;
+    onClose: () => void;
+    onConfirm: (mode) => void;
+}
+
+const LaserStartModal: React.FC<LaserStartModalProps> = ({
     showStartModal,
+    toolHeadIdentifier,
     isHeightPower,
     isSerialConnect,
     isRotate,
     onClose,
     onConfirm
-}) {
+}) => {
     const [selectedValue, setSelectedValue] = useState(MANUAL_MODE);
     const { size } = useSelector(state => state?.machine);
-    const { materialThickness } = useSelector(state => state?.workspace);
+    const { materialThickness, toolHead, activeMachine, connectionType, crosshairOffset } = useSelector(state => state?.workspace);
     const dispatch = useDispatch();
+    const [supportSemiMode, setSupportSemiMode] = useState(false);
 
     useEffect(() => {
-        if (isSerialConnect) {
-            setSelectedValue(isRotate ? MANUAL_MODE : SEMI_AUTO_MODE);
+        const isSM2 = includes([
+            SnapmakerA350Machine.identifier,
+            SnapmakerA250Machine.identifier,
+            SnapmakerA150Machine.identifier
+        ], activeMachine.identifier);
+        const supportHead = includes([
+            standardLaserToolHead.identifier,
+            highPower10WLaserToolHead.identifier,
+        ], toolHeadIdentifier);
+        const notSupportSM2SerialLaserHead = includes([
+            L2WLaserToolModule.identifier,
+            L20WLaserToolModule.identifier,
+            L40WLaserToolModule.identifier
+        ], toolHeadIdentifier);
+
+        setSupportSemiMode(supportHead || !(notSupportSM2SerialLaserHead && isSM2 && connectionType === ConnectionType.Serial));
+    });
+
+    useEffect(() => {
+        if (isRotate) {
+            setSelectedValue(MANUAL_MODE);
         } else {
-            if (isHeightPower) {
-                setSelectedValue(isRotate ? MANUAL_MODE : AUTO_MDOE);
+            if (isSerialConnect) {
+                setSelectedValue(supportSemiMode ? SEMI_AUTO_MODE : MANUAL_MODE);
             } else {
-                setSelectedValue(isRotate ? MANUAL_MODE : SEMI_AUTO_MODE);
+                if (isHeightPower) {
+                    setSelectedValue(AUTO_MDOE);
+                } else {
+                    setSelectedValue(supportSemiMode ? SEMI_AUTO_MODE : MANUAL_MODE);
+                }
             }
         }
-    }, [isSerialConnect, isRotate, isHeightPower]);
+    }, [isSerialConnect, isRotate, isHeightPower, supportSemiMode]);
 
     const onChange = (event) => {
         setSelectedValue(event.target.value);
@@ -58,6 +97,7 @@ function LaserStartModal({
         return isUndefined(_isSerialConnect) || _isSerialConnect === isSerialConnect;
     };
 
+
     const handleDisplay = v => v.display && handlerAxis(v.display) && handlerPowerLevel(v.display) && handlerConnect(v.display);
     const handleDisable = v => {
         let disabled = false;
@@ -65,9 +105,10 @@ function LaserStartModal({
             case AUTO_MDOE:
                 disabled = isSerialConnect;
                 break;
-            case SEMI_AUTO_MODE:
+            case SEMI_AUTO_MODE: {
                 disabled = isRotate;
                 break;
+            }
             default:
                 disabled = false;
                 break;
@@ -82,6 +123,17 @@ function LaserStartModal({
     };
     useEffect(() => {
         onChangeMaterialThickness(materialThickness);
+    }, []);
+
+
+    const [manualModeDesc, setManualModeDesc] = useState('key-Workspace/LaserStartJob-manual_mode_description');
+    useEffect(() => {
+        const useLaserSpotHead = includes([
+            L2WLaserToolModule.identifier,
+            L20WLaserToolModule.identifier,
+            L40WLaserToolModule.identifier,
+        ], toolHeadIdentifier);
+        setManualModeDesc(useLaserSpotHead ? 'key-Workspace/LaserStartJob-20w_40w_2w_manual_mode_description' : 'key-Workspace/LaserStartJob-manual_mode_description');
     }, []);
 
 
@@ -123,7 +175,7 @@ function LaserStartModal({
                     </div>
                 </div>
             ),
-            display: {},
+            display: supportSemiMode,
             disable: {
                 isRotate: true,
                 // isHeightPower: true,
@@ -134,7 +186,7 @@ function LaserStartModal({
             key: MANUAL_MODE,
             name: i18n._('key-Workspace/LaserStartJob-manual_mode'),
             description: () => (
-                <Trans i18nKey="key-Workspace/LaserStartJob-manual_mode_description">
+                <Trans i18nKey={manualModeDesc}>
                     In <b>Manually control</b> the movement of the execution head until the laser beam converges into the smallest spot on the surface of
                     the material. Click to <b>start the job</b>, the machine will use the current height as the laser height.
                 </Trans>
@@ -162,6 +214,21 @@ function LaserStartModal({
                 {i18n._('key-Workspace/LaserStartJob-Select Mode')}
             </Modal.Header>
             <Modal.Body>
+                {
+                    includes([L2WLaserToolModule.identifier], toolHead)
+                && connectionType === ConnectionType.Serial
+                && includes([SnapmakerA350Machine.identifier, SnapmakerA250Machine.identifier, SnapmakerA150Machine.identifier], activeMachine.identifier)
+                && (
+                    <Alert
+                        className="width-percent-100 border-radius-8"
+                        message={
+                            i18n._('Key-Workspace/LaserStart-offset-warning-After printing with the 2W red light extruder connected via serial, the working origin may be changed (X offset {{ xOffset }}, Y offset {{ yOffset }}). Please be aware of this issue when performing repeated engravings.', { xOffset: round(crosshairOffset.x, 2), yOffset: round(crosshairOffset.y, 2) })
+                        }
+                        type="warning"
+                        showIcon
+                    />
+                )
+                }
                 <Radio.Group
                     style={{ display: 'flex', flexDirection: 'column' }}
                     onChange={onChange}
@@ -203,8 +270,7 @@ function LaserStartModal({
             </Modal.Footer>
         </Modal>
     );
-}
-
+};
 
 LaserStartModal.propTypes = {
     showStartModal: PropTypes.bool.isRequired,
@@ -214,4 +280,5 @@ LaserStartModal.propTypes = {
     onClose: PropTypes.func.isRequired,
     onConfirm: PropTypes.func.isRequired,
 };
+
 export default LaserStartModal;

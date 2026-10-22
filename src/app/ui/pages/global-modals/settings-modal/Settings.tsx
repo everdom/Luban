@@ -11,10 +11,12 @@ import { withRouter } from 'react-router-dom';
 import settings from '../../../../config/settings';
 import confirm from '../../../../lib/confirm';
 import i18n from '../../../../lib/i18n';
+import api from '../../../../api';
 import Anchor from '../../../components/Anchor';
 import Download from './Download';
 import General from './General';
 import MachineSettings from './MachineSettings';
+import OctoSetPort from './OctoSetPort';
 import styles from './styles.styl';
 
 const mapSectionPathToId = (path = '') => {
@@ -53,6 +55,12 @@ class Settings extends React.PureComponent {
             path: 'machine',
             title: i18n._('key-App/Settings/Settings-Machine Settings'),
             component: (props) => <MachineSettings {...props} />
+        },
+        {
+            id: 'port',
+            path: 'port',
+            title: i18n._('key-App/Settings/MachineSettings-Port Settings'),
+            component: (props) => <OctoSetPort {...props} />
         }
     ];
 
@@ -93,11 +101,16 @@ class Settings extends React.PureComponent {
                 });
 
                 if (lang !== i18next.language) {
+                    // frontend
                     i18next.changeLanguage(lang, () => {
                         this.props.history.push('/');
                         const uri = new Uri(window.location.search);
                         uri.replaceQueryParam('lang', lang);
                         window.location.search = uri.toString();
+                    });
+
+                    api.i18n.changeLanguage({
+                        lang
                     });
                 }
             },

@@ -1,5 +1,6 @@
 import { includes } from 'lodash';
 
+import { v4 as uuidv4 } from 'uuid';
 import {
     CNC_HEAD_MODULE_IDS,
     EMERGENCY_STOP_BUTTON,
@@ -22,6 +23,7 @@ const log = logger('machine:instance:ArtisanInstance');
 
 
 class ArtisanMachineInstance extends MachineInstance {
+    public id = uuidv4()
     private async _onMachineReadySACP() {
         // TO DO: Need to get seriesSize for 'connection:connected' event
         const state: ConnectedData = {};
@@ -63,7 +65,7 @@ class ArtisanMachineInstance extends MachineInstance {
             state.toolHead = MODULEID_TOOLHEAD_MAP['0']; // default extruder
         } else if (toolHeadModules.length === 1) {
             const module = toolHeadModules[0];
-            state.toolHead = MODULEID_TOOLHEAD_MAP[module.moduleId];
+            state.toolHead = (this.channel as SacpChannelBase).getModuleIdentifier(module);
         } else if (toolHeadModules.length === 2) {
             // hard-coded IDEX head for J1, refactor this later.
             state.toolHead = MODULEID_TOOLHEAD_MAP['00'];
@@ -72,7 +74,7 @@ class ArtisanMachineInstance extends MachineInstance {
         state.moduleStatusList = moduleListStatus;
 
         // Get Coordinate Info
-        const { data: coordinateInfos } = await this.channel.getCoordinateInfo();
+        const { data: coordinateInfos } = await (this.channel as SacpChannelBase).getCoordinateInfo();
         const isHomed = !(coordinateInfos?.coordinateSystemInfo?.homed); // 0: homed, 1: need to home
         state.isHomed = isHomed;
         state.isMoving = false;
@@ -85,6 +87,8 @@ class ArtisanMachineInstance extends MachineInstance {
         // Legacy
         const sacpClient = (this.channel as SacpChannelBase).sacpClient;
         await (this.channel as SacpChannelBase).startHeartbeatLegacy(sacpClient, undefined);
+
+        (this.channel as SacpChannelBase).registerErrorReportHandler();
 
         (this.channel as SacpChannelBase).setROTSubscribeApi();
     }
@@ -106,7 +110,9 @@ class ArtisanMachineInstance extends MachineInstance {
         log.info('On closing connection...');
 
         log.info('Stop heartbeat.');
-        await this.channel.stopHeartbeat();
+        await this.channel.stopHeartbeat(this.id);
+
+        (this.channel as SacpChannelBase).unregisterErrorReportHandler();
     }
 }
 

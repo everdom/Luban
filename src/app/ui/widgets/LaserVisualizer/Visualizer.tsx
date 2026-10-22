@@ -24,6 +24,7 @@ import {
 import { Origin, Workpiece, WorkpieceShape, convertMaterialsToWorkpiece } from '../../../constants/coordinate';
 import { actions as editorActions } from '../../../flux/editor';
 import { actions as operationHistoryActions } from '../../../flux/operation-history';
+import { actions as laserActions } from '../../../flux/laser';
 import i18n from '../../../lib/i18n';
 import modal from '../../../lib/modal';
 import { humanReadableTime } from '../../../lib/time-utils';
@@ -38,6 +39,7 @@ import Canvas from '../../components/SMCanvas';
 import Space from '../../components/Space';
 import { PageMode } from '../../pages/PageMode';
 import SVGClippingOverlay from '../../views/model-operation-overlay/SVGClippingOverlay';
+import ABPositionOverlay from '../../views/model-operation-overlay/ABPositionOverlay';
 import PrintablePlate from '../CncLaserShared/PrintablePlate';
 import VisualizerBottomLeft from '../CncLaserShared/VisualizerBottomLeft';
 import VisualizerTopRight from '../CncLaserTopRight/VisualizerTopRight';
@@ -67,6 +69,12 @@ interface VisualizerProps {
     // actions
     undo: () => void;
     redo: () => void;
+
+    updateShowSVGShapeLibrary: (isShow: boolean) => void
+
+    isOnABPosition: boolean
+    updateIsOnABPosition: (isOnABPosition: boolean) => void
+    updateABpositionBackground: (APosition: any, BPosition: any) => void
 }
 
 
@@ -164,7 +172,9 @@ class Visualizer extends React.Component<VisualizerProps> {
         }),
 
         pageMode: PropTypes.string.isRequired,
-        setPageMode: PropTypes.func.isRequired
+        setPageMode: PropTypes.func.isRequired,
+        APosition: PropTypes.object.isRequired,
+        BPosition: PropTypes.object.isRequired,
     };
 
     private contextMenuRef = React.createRef();
@@ -376,7 +386,8 @@ class Visualizer extends React.Component<VisualizerProps> {
         },
         setMode: (mode, extShape) => {
             this.props.setMode(mode, extShape);
-        }
+        },
+        updateShowSVGShapeLibrary: (isShow: boolean) => this.props.updateShowSVGShapeLibrary(isShow)
     };
 
     public constructor(props) {
@@ -495,7 +506,7 @@ class Visualizer extends React.Component<VisualizerProps> {
         const contextMenuDisabled = !isOnlySelectedOneModel || !this.props.selectedModelArray[0].visible;
         const displayedType = this.props.displayedType;
         const pasteDisabled = (this.props.modelGroup.clipboard.length === 0);
-        const editable = true;
+        const editable = this.props.pageMode !== PageMode.ABPosition;
 
         return (
             <div
@@ -550,7 +561,6 @@ class Visualizer extends React.Component<VisualizerProps> {
                         allowedFiles={this.allowedFiles}
                         headType={HEAD_LASER}
                         showSVGShapeLibrary={this.props.showSVGShapeLibrary}
-                        updateEditorState={this.props.updateEditorState}
                     />
                 </div>
                 <div
@@ -738,6 +748,19 @@ class Visualizer extends React.Component<VisualizerProps> {
                         </div>
                     )
                 }
+                {/* A-B Position Model */
+                    this.props.pageMode === PageMode.ABPosition && (
+                        <div className={styles['visualizer-Overlay-left']}>
+                            <ABPositionOverlay
+                                onClose={() => {
+                                    this.props.updateABpositionBackground(this.props.APosition, this.props.BPosition);
+                                    this.props.setPageMode(PageMode.Default);
+                                    this.props.updateIsOnABPosition(false);
+                                }}
+                            />
+                        </div>
+                    )
+                }
             </div>
         );
     }
@@ -753,12 +776,13 @@ const mapStateToProps = (state, ownProps) => {
 
     const background: { enabled: boolean; group: Group } = state.laser.background;
 
-    const { progressStatesManager, shouldGenerateGcodeCounter } = state.laser;
+    const { progressStatesManager, shouldGenerateGcodeCounter, isOnABPosition } = state.laser;
     const {
         SVGActions, scale, target, materials, page, selectedModelID, svgModelGroup, displayedType,
         isChangedAfterGcodeGenerating, renderingTimestamp, stage, progress,
         coordinateMode, coordinateSize,
         enableShortcut, isOverSize, SVGCanvasMode, SVGCanvasExt,
+        APosition, BPosition
     } = state.laser;
 
     const workpiece: Workpiece = state.laser.workpiece;
@@ -804,7 +828,10 @@ const mapStateToProps = (state, ownProps) => {
         isOverSize,
         SVGCanvasMode,
         SVGCanvasExt,
-        showSVGShapeLibrary
+        showSVGShapeLibrary,
+        isOnABPosition,
+        APosition,
+        BPosition
     };
 };
 
@@ -855,7 +882,7 @@ const mapDispatchToProps = (dispatch) => {
         onDrawComplete: (elem) => dispatch(editorActions.drawComplete('laser', elem)),
         onBoxSelect: (bbox, onlyContainSelect) => dispatch(editorActions.boxSelect('laser', bbox, onlyContainSelect)),
         setMode: (mode, ext) => dispatch(editorActions.setCanvasMode('laser', mode, ext)),
-        updateEditorState: (state) => dispatch(editorActions.updateEditorState(state)),
+        updateShowSVGShapeLibrary: (isShow: boolean) => dispatch(editorActions.updateShowSVGShapeLibrary(isShow)),
 
         elementActions: {
             moveElementsStart: (elements) => dispatch(editorActions.moveElementsStart('laser', elements)),
@@ -872,9 +899,13 @@ const mapDispatchToProps = (dispatch) => {
             isPointInSelectArea: (x, y) => dispatch(editorActions.isPointInSelectArea('laser', x, y)),
             getMouseTargetByCoordinate: (x, y) => dispatch(editorActions.getMouseTargetByCoordinate('laser', x, y)),
             isSelectedAllVisible: () => dispatch(editorActions.isSelectedAllVisible('laser'))
-        }
+        },
         // onModelTransform: () => dispatch(editorActions.onModelTransform('laser')),
         // onModelAfterTransform: () => dispatch(editorActions.onModelAfterTransform('laser'))
+
+        updateIsOnABPosition: (isOnABPosition: boolean) => dispatch(laserActions.updateIsOnABPosition(isOnABPosition)),
+        updateABpositionBackground: (APosition, BPosition) => dispatch(laserActions.updateABpositionBackground(APosition, BPosition))
+
     };
 };
 

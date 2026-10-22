@@ -6,11 +6,13 @@ import { Box3 } from 'three';
 import {
     CONNECTION_STATUS_IDLE,
     LEFT_EXTRUDER,
+    SetupCoordinateMethod,
 } from '../../constants';
 import History from '../../core/History';
 import { CircularArray } from '../../lib/collections';
 // import { controller } from '../../lib/controller';
 import { MachineAgent } from './MachineAgent';
+import { AxisWorkRange } from './types';
 
 export const WORKSPACE_STAGE = {
     EMPTY: 0,
@@ -18,6 +20,7 @@ export const WORKSPACE_STAGE = {
     LOAD_GCODE_SUCCEED: 2,
     LOAD_GCODE_FAILED: 3,
 };
+
 
 /**
  * Connection Type
@@ -74,6 +77,9 @@ declare interface WorkspaceOtherState {
 
     boundingBox: Box3;
     previewBoundingBox: object;
+
+    // Actual XYZAB work range
+    gcodeAxisWorkRange: AxisWorkRange;
 
     gcodeFiles: object[];
 
@@ -269,4 +275,10 @@ export const initialState: WorkspaceState = {
     terminalHistory: new CircularArray<string>(1000),
     consoleHistory: new History<string>(1000),
     consoleLogs: [],
+
+    // ray
+    // control planel
+    setupCoordinateMethod: SetupCoordinateMethod.Manually,
+    // 1.6.8 < (has control planel), 1.6.8 >= (without control planel)
+    isRayNewVersion: false
 };

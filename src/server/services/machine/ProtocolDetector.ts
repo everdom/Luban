@@ -136,7 +136,9 @@ class ProtocolDetector {
         setTimeout(() => {
             if (!hasData) {
                 protocol = SerialPortProtocol.SacpOverSerialPort;
-                trySerialConnect?.close();
+                if (trySerialConnect.isOpen) {
+                    trySerialConnect?.close();
+                }
             }
         }, 2000);
 
@@ -155,21 +157,29 @@ class ProtocolDetector {
                 // concat all previous buffer
                 responseBuffer = Buffer.concat([responseBuffer, data]);
                 const m1006Response = responseBuffer.toString();
+                const m1006ResponseHex = responseBuffer.toString();
 
                 log.debug(`M1006 response: "${m1006Response}`);
+                log.debug(`M1006 response hex: "${m1006ResponseHex}`);
 
                 // M1006 response: SACP V1 => SACP
                 if (m1006Response.match(/SACP/g)) {
                     protocol = SerialPortProtocol.SacpOverSerialPort;
-                    trySerialConnect?.close();
-
-                    resolve();
+                    if (trySerialConnect.isOpen) {
+                        trySerialConnect?.close();
+                    } else {
+                        resolve();
+                    }
                 } else if (m1006Response.match(/ok/g)) {
                     // ok => plaintext protocol
                     protocol = SerialPortProtocol.PlainText;
-                    trySerialConnect?.close();
-
-                    resolve();
+                    if (trySerialConnect.isOpen) {
+                        trySerialConnect?.close();
+                    } else {
+                        resolve();
+                    }
+                } else {
+                    hasData = false;
                 }
             });
             trySerialConnect.on('close', () => {
@@ -177,6 +187,9 @@ class ProtocolDetector {
             });
             trySerialConnect.on('error', (err) => {
                 log.error(`error = ${err}`);
+                if (trySerialConnect.isOpen) {
+                    trySerialConnect?.close();
+                }
             });
             trySerialConnect.once('open', () => {
                 // Use M1006 to detect if SACP is supported

@@ -1,7 +1,7 @@
+import SocketEvent from '../../../app/communication/socket-events';
 import type SocketServer from '../../lib/SocketManager';
 import { connectionManager } from '../machine/ConnectionManager';
-import SocketEvent from '../../../app/communication/socket-events';
-
+import { octo } from '../machine/adaptor/Octo';
 
 function register(socketServer: SocketServer): void {
     const connectionEventsObject = {
@@ -19,6 +19,7 @@ function register(socketServer: SocketServer): void {
         [SocketEvent.SetOrigin]: connectionManager.setWorkOrigin,
         // 'connection:getWorkSpeedFactor': connectionManager.getWorkSpeedFactor,
         [SocketEvent.SetSpeedFactor]: connectionManager.updateWorkSpeedFactor,
+        [SocketEvent.SetMotorPowerMode]: connectionManager.setMotorPowerMode,
 
         // 3d printing control services
         [SocketEvent.SwitchActiveExtruder]: connectionManager.switchExtruder,
@@ -30,9 +31,12 @@ function register(socketServer: SocketServer): void {
 
         // laser control services
         [SocketEvent.SetLaserPower]: connectionManager.updateLaserPower,
-        [SocketEvent.SwitchLaserPower]: connectionManager.switchLaserPower,
+        [SocketEvent.TurnOnTestLaser]: connectionManager.turnOnTestLaser,
+        [SocketEvent.TurnOffLaser]: connectionManager.turnOffLaser,
         [SocketEvent.CalcMaterialThickness]: connectionManager.getLaserMaterialThickness,
         [SocketEvent.AbortMaterialThickness]: connectionManager.abortLaserMaterialThickness,
+        [SocketEvent.TurnOnCrosshair]: connectionManager.turnOnCrosshair,
+        [SocketEvent.TurnOffCrosshair]: connectionManager.turnOffCrosshair,
         [SocketEvent.GetCrosshairOffset]: connectionManager.getCrosshairOffset,
         [SocketEvent.SetCrosshairOffset]: connectionManager.setCrosshairOffset,
         [SocketEvent.GetFireSensorSensitivity]: connectionManager.getFireSensorSensitivity,
@@ -77,6 +81,9 @@ function register(socketServer: SocketServer): void {
         [SocketEvent.ExportLogToExternalStorage]: connectionManager.exportLogToExternalStorage,
         [SocketEvent.GetFirmwareVersion]: connectionManager.getFirmwareVersion,
         [SocketEvent.UpgradeFirmware]: connectionManager.upgradeFirmwareFromFile,
+
+        // Octo onResetPort
+        [SocketEvent.OnResetPort]: octo.onResetPort,
     };
 
     Object.entries(connectionEventsObject).forEach(([key, value]) => {
@@ -86,5 +93,5 @@ function register(socketServer: SocketServer): void {
 
 
 export {
-    register,
+    register
 };

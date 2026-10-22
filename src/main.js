@@ -1,5 +1,10 @@
+// babel/preset-env, useBuiltIns: "entry"
+// https://babeljs.io/docs/babel-preset-env#usebuiltins
+import 'core-js';
+// import 'core-js/stable';
+// import 'regenerator-runtime/runtime';
+
 import { enable as electronEnable, initialize as electronRemoteMainInitialize } from '@electron/remote/main';
-import 'core-js/stable';
 import { app, BrowserWindow, dialog, ipcMain, Menu, powerSaveBlocker, protocol, screen, session, shell } from 'electron';
 import Store from 'electron-store';
 import { autoUpdater } from 'electron-updater';
@@ -8,7 +13,6 @@ import { debounce, isNull, isUndefined } from 'lodash';
 import log from 'loglevel';
 import fetch from 'node-fetch';
 import path from 'path';
-import 'regenerator-runtime/runtime';
 import url from 'url';
 
 import DataStorage from './DataStorage';
@@ -16,6 +20,23 @@ import MenuBuilder, { addRecentFile, cleanAllRecentFiles } from './electron-app/
 import { configureWindow } from './electron-app/window';
 import pkg from './package.json';
 
+import * as Sentry from "@sentry/electron/main";
+
+Sentry.init({
+  dsn: "https://cd2af28a126afbc7a8257a75b3b5d0ab@o4508125599563776.ingest.us.sentry.io/4508125605068800",
+  release: pkg.version,
+//   integrations: [new Sentry.Integrations.BrowserTracing()],
+  tracesSampleRate: 1.0,
+  debug: true,
+  beforeSend(event) {
+    log.info('Sentry event::: ', event);
+    // Log the error to the console
+    if (event.exception) {
+      console.error('Captured exception:', event.exception.values[0]);
+    }
+    return event;
+  }
+});
 
 log.setLevel(log.levels.INFO);
 
@@ -56,7 +77,8 @@ function getBrowserWindowOptions() {
             // remote module is default false
             // https://www.electronjs.org/docs/latest/breaking-changes#default-changed-enableremotemodule-defaults-to-false
             enableRemoteModule: true,
-            nodeIntegrationInWorker: true
+            nodeIntegrationInWorker: true,
+            webviewTag: true,
         }
     };
 
@@ -139,6 +161,16 @@ function updateHandle() {
 
     // Emitted when there is an available update. The update is downloaded automatically if autoDownload is true.
     autoUpdater.on('update-available', async (downloadInfo) => {
+        // {
+        //   version: string;
+        //   files: Array<{ url: string; sha512: string; size: number; }>;
+        //   path: string;
+        //   sha512: string;
+        //   releaseDate: string;
+        //   releaseNotes: string;
+        // }
+        log.debug('event: update-available');
+
         sendUpdateMessage(message.updateAva);
 
         // Get chinese version of release note for zh-CN locale
@@ -177,7 +209,11 @@ function updateHandle() {
     autoUpdater.on('update-downloaded', debounce((downloadInfo) => {
         ipcMain.on('replaceAppNow', () => {
             // some code here to handle event
-            autoUpdater.quitAndInstall();
+            try {
+                autoUpdater.quitAndInstall();
+            } catch (err) {
+                log.error('quitAndInstall get err', err);
+            }
         });
         mainWindow.webContents.send('is-replacing-app-now', downloadInfo);
     }), 300);
@@ -188,9 +224,14 @@ function updateHandle() {
     });
     // Emitted when is ready to check for update
     ipcMain.on('checkForUpdate', async (event, autoUpdateProviderOptions) => {
-        log.info(`checkForUpdates, feed URL: ${autoUpdateProviderOptions.url} (${autoUpdateProviderOptions.provider})`);
-
-        autoUpdater.setFeedURL(autoUpdateProviderOptions);
+        // Set feed URL
+        if (autoUpdateProviderOptions.provider === 'generic') {
+            log.info(`Check for updates, feed URL: ${autoUpdateProviderOptions.url}`);
+            autoUpdater.setFeedURL(autoUpdateProviderOptions);
+        } else {
+            log.info(`Check for updates, provider: ${autoUpdateProviderOptions.provider}`);
+            autoUpdater.setFeedURL(autoUpdateProviderOptions);
+        }
 
         try {
             await autoUpdater.checkForUpdates();
@@ -308,6 +349,14 @@ const showMainWindow = async () => {
     const windowOptions = getBrowserWindowOptions();
     const window = new BrowserWindow(windowOptions);
     mainWindow = window;
+    // Monitor policy links, do not allow redirection
+    window.webContents.on('did-attach-webview', (e, webContent)=>  {
+        webContent.on('will-navigate', (e, url) => {
+            if (url.includes('policy')) {
+                e.preventDefault();
+            }
+        });
+    });
     powerId = powerSaveBlocker.start('prevent-display-sleep');
 
     if (process.platform === 'win32') {

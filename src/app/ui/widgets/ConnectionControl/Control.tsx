@@ -2,11 +2,10 @@ import { WorkflowStatus } from '@snapmaker/luban-platform';
 import { isNil } from 'lodash';
 import includes from 'lodash/includes';
 import map from 'lodash/map';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-
+import { controller } from '../../../communication/socket-communication';
 import {
-    HEAD_CNC,
     HEAD_PRINTING,
     IMPERIAL_UNITS,
     METRIC_UNITS,
@@ -15,12 +14,8 @@ import { RootState } from '../../../flux/index.def';
 import { actions as widgetsActions } from '../../../flux/widget';
 import { actions as workspaceActions } from '../../../flux/workspace';
 import { MachineAgent } from '../../../flux/workspace/MachineAgent';
-import { controller } from '../../../communication/socket-communication';
 import usePrevious from '../../../lib/hooks/previous';
-import i18n from '../../../lib/i18n';
 import { in2mm, mm2in } from '../../../lib/units';
-import { Button } from '../../components/Buttons';
-import Select from '../../components/Select';
 import ControlPanel from './ControlPanel';
 import DisplayPanel from './DisplayPanel';
 import { DEFAULT_AXES, DISTANCE_MAX, DISTANCE_MIN, DISTANCE_STEP } from './constants';
@@ -66,16 +61,14 @@ const normalizeToRange = (n, min, max) => {
     return n;
 };
 
-declare interface WidgetActions {
-    setTitle: (title: string) => void;
-}
-
-export declare interface ConnectionControlProps {
+declare interface ConnectionControlProps {
     widgetId: string;
-    widgetActions: WidgetActions;
+    isNotInWorkspace?: boolean
+    runBoundary?: () => void
+    canABPosition?: boolean
 }
 
-const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) => {
+const Control: React.FC<ConnectionControlProps> = ({ widgetId, isNotInWorkspace, runBoundary, canABPosition }) => {
     const dispatch = useDispatch();
 
     const { widgets } = useSelector((state: RootState) => state.widget);
@@ -85,13 +78,15 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
 
     const server: MachineAgent = useSelector((state: RootState) => state.workspace.server);
     const {
+        homingModal,
         isMoving,
         workflowStatus,
         workPosition,
         originOffset,
-        boundingBox
+        // gcodeAxisWorkRange: boundingBox,
+        gcodeFile
     } = useSelector((state: RootState) => state.workspace);
-
+    const [boundingBox, setBoundingBox] = useState(gcodeFile?.gcodeAxisWorkRange);
 
     const { jog, axes } = widgets[widgetId];
     const { speed = 1500, keypad, selectedDistance, customDistance, selectedAngle, customAngle } = jog;
@@ -99,7 +94,8 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
     const serverRef = useRef(server);
     useEffect(() => {
         serverRef.current = server;
-    }, [server]);
+    }, [server, gcodeFile]);
+    useEffect(() => setBoundingBox(gcodeFile?.gcodeAxisWorkRange), [gcodeFile]);
 
 
     function getInitialState() {
@@ -160,7 +156,10 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
                     y: 0,
                     z: 0
                 }
-            }
+            },
+
+            // enableShortcut
+            enableShortcut: true
         };
     }
 
@@ -185,6 +184,12 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
                 jogSpeedOptions: [...state.jogSpeedOptions, newOption]
             });
         },
+        getJogSpeed: () => {
+            const { jogSpeed } = state;
+
+            return jogSpeed;
+        },
+
         getJogDistance: () => {
             const { units } = state;
             if (selectedDistance) {
@@ -205,11 +210,6 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
             const s = map(params, (value, axis) => {
                 const axisMoved = axis.toUpperCase();
                 const signNumber = 1;
-                // if (axisMoved === 'Y' && state.workPosition.isFourAxis) {
-                //     signNumber = -1;
-                // } else {
-                //     signNumber = 1;
-                // }
                 sArr.push({
                     axis: axisMoved,
                     distance: parseFloat(state.workPosition[axisMoved.toLowerCase()]) + (signNumber * value)
@@ -228,7 +228,7 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
             setState({ ...state, customAngle: _customAngle });
         },
 
-        move: (params = {}) => {
+        move: (params = {}, useGcode) => {
             const sArr = [];
             const s = map(params, (value, axis) => {
                 sArr.push({
@@ -239,8 +239,11 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
             }).join(' ');
             if (s) {
                 const gcode = `G0 ${s} F${state.jogSpeed}`;
-                // actions.executeGcode(`G0 ${s} F${state.jogSpeed}`);
-                actions.coordinateMove(gcode, sArr, state.jogSpeed);
+                if (useGcode) {
+                    actions.executeGcode(gcode);
+                } else {
+                    actions.coordinateMove(gcode, sArr, state.jogSpeed);
+                }
             }
         },
         executeGcode: (gcode) => {
@@ -301,43 +304,6 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
             }
             setState({ ...state, customDistance: distance });
         },
-        runBoundary: () => {
-            const { bbox } = state;
-            const gcode = [];
-            if (headType === HEAD_CNC) {
-                gcode.push('G91', 'G0 Z5 F400', 'G90');
-            }
-            if (workPosition.isFourAxis) {
-                const angleDiff = Math.abs(bbox.max.b - bbox.min.b);
-                const minB = 0;
-                const maxB = angleDiff > 360 ? 360 : angleDiff;
-                gcode.push(
-                    'G90', // absolute position
-                    `G0 B${minB} Y${bbox.min.y} F${state.jogSpeed}`, // run boundary
-                    `G0 B${minB} Y${bbox.max.y}`,
-                    `G0 B${maxB} Y${bbox.max.y}`,
-                    `G0 B${maxB} Y${bbox.min.y}`,
-                    `G0 B${minB} Y${bbox.min.y}`,
-                    `G0 B${workPosition.b} Y${workPosition.y}` // go back to origin
-                );
-            } else {
-                gcode.push(
-                    'G90', // absolute position
-                    `G0 X${bbox.min.x} Y${bbox.min.y} F${state.jogSpeed}`, // run boundary
-                    `G0 X${bbox.min.x} Y${bbox.max.y}`,
-                    `G0 X${bbox.max.x} Y${bbox.max.y}`,
-                    `G0 X${bbox.max.x} Y${bbox.min.y}`,
-                    `G0 X${bbox.min.x} Y${bbox.min.y}`,
-                    `G0 X${workPosition.x} Y${workPosition.y}` // go back to origin
-                );
-            }
-
-            if (headType === HEAD_CNC) {
-                gcode.push('G91', 'G0 Z-5 F400', 'G90');
-            }
-
-            actions.executeGcode(gcode.join('\n'));
-        }
     };
 
     const controllerEvents = {
@@ -367,13 +333,17 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
     }
 
     useEffect(() => {
-        widgetActions.setTitle(i18n._('key-Workspace/Console-Control'));
-
         addControllerEvents();
         return () => {
             removeControllerEvents();
         };
     }, [prevState]);
+
+
+    const canClick = useMemo(() => {
+        return isConnected && includes([WorkflowStatus.Unknown, WorkflowStatus.Idle, WorkflowStatus.Stopped], workflowStatus) && !isMoving;
+    }, [isConnected, workflowStatus, isMoving, homingModal]);
+
 
     useEffect(() => {
         const { keypadJogging, selectedAxis } = state;
@@ -384,9 +354,9 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
             ...state,
             keypadJogging: (workflowStatus === WorkflowStatus.Idle) ? keypadJogging : false,
             selectedAxis: (workflowStatus === WorkflowStatus.Idle) ? selectedAxis : '',
-            canClick: (workflowStatus === WorkflowStatus.Idle || workflowStatus === WorkflowStatus.Stopped) && !isMoving
+            canClick: canClick,
         });
-    }, [workflowStatus, isMoving]);
+    }, [isConnected, workflowStatus, isMoving, canClick]);
 
     useEffect(() => {
         setState({
@@ -463,22 +433,17 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
         }
     }, [state]);
 
-    function canClick() {
-        return isConnected && includes([WorkflowStatus.Unknown, WorkflowStatus.Idle], workflowStatus) && !isMoving;
-    }
-
-    const _canClick = canClick();
-
     return (
         <div>
-            <DisplayPanel
-                workPosition={workPosition}
-                originOffset={state.originOffset}
-                headType={headType}
-                executeGcode={actions.executeGcode}
-                state={state}
-            />
-
+            {!isNotInWorkspace && (
+                <DisplayPanel
+                    workPosition={workPosition}
+                    originOffset={state.originOffset}
+                    headType={headType}
+                    executeGcode={actions.executeGcode}
+                    state={state}
+                />
+            )}
             {/* Comment this since Luban v4.0 and will be used in the future */}
             {/* <div>
                 <KeypadOverlay
@@ -495,38 +460,17 @@ const Control: React.FC<ConnectionControlProps> = ({ widgetId, widgetActions }) 
                 </KeypadOverlay>
             </div> */}
 
-            <div className="margin-vertical-8">
-                <Button
-                    type="primary"
-                    level="level-three"
-                    width="96px"
-                    disabled={!_canClick}
-                    // disabled={false}
-                    onClick={() => dispatch(workspaceActions.executeGcodeAutoHome(true))}
-                >
-                    {i18n._('key-Workspace/Console-Home')}
-                </Button>
-                <div className="sm-flex justify-space-between align-center">
-                    <span className="max-width-208 text-overflow-ellipsis">{i18n._('key-Workspace/Console-Jog Speed')}</span>
-                    <Select
-                        className="margin-left-8"
-                        clearable={false}
-                        size="middle"
-                        options={state.jogSpeedOptions}
-                        onNewOptionClick={actions.onCreateJogSpeedOption}
-                        searchable
-                        disabled={!_canClick}
-                        value={state.jogSpeed}
-                        onChange={actions.onChangeJogSpeed}
-                    />
-                </div>
-            </div>
-
             <ControlPanel
+                enableShortcut={state.enableShortcut}
+                disabled={!canClick}
                 state={state}
                 workPosition={workPosition}
+                originOffset={state.originOffset}
                 actions={actions}
                 executeGcode={actions.executeGcode}
+                isNotInWorkspace={isNotInWorkspace}
+                runBoundary={runBoundary}
+                canABPosition={canABPosition}
             />
         </div>
     );

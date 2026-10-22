@@ -1,15 +1,18 @@
 import { Machine, MachineType } from '@snapmaker/luban-platform';
 
-import { quickSwapKitModule } from './snapmaker-2-modules';
+import { quickSwapKitModule, bracingKitModule } from './snapmaker-2-modules';
 import {
     L20WLaserToolModule,
+    L2WLaserToolModule,
     L40WLaserToolModule,
     dualExtrusionPrintToolHead,
     highPower10WLaserToolHead,
+    highPower200WCNCToolHead,
     printToolHead,
     standardCNCToolHead,
     standardLaserToolHead,
 } from './snapmaker-2-toolheads';
+import { JobOffsetMode } from '../constants/coordinate';
 
 /*
     {
@@ -27,7 +30,7 @@ export const machine: Machine = {
     img: '/resources/images/machine/size-2.0-A350.jpg',
 
     metadata: {
-        size: { x: 320, y: 350, z: 330 },
+        size: { x: 320, y: 350, z: 325 },
 
         toolHeads: [
             {
@@ -39,7 +42,7 @@ export const machine: Machine = {
                 configPath: 'printing/a350_dual',
                 workRange: {
                     min: [0, 0, 0],
-                    max: [320, 350, 290],
+                    max: [320, 330, 285],
                 },
             },
             {
@@ -50,6 +53,12 @@ export const machine: Machine = {
                     max: [345, 357, 334],
                 },
                 supportCameraCapture: true,
+                runBoundaryModeOptions: [
+                    {
+                        label: 'Laser Spot',
+                        value: JobOffsetMode.LaserSpot,
+                    },
+                ]
             },
             {
                 identifier: highPower10WLaserToolHead.identifier,
@@ -59,6 +68,12 @@ export const machine: Machine = {
                     max: [345, 357, 334],
                 },
                 supportCameraCapture: true,
+                runBoundaryModeOptions: [
+                    {
+                        label: 'Laser Spot',
+                        value: JobOffsetMode.LaserSpot,
+                    },
+                ]
             },
             {
                 identifier: L20WLaserToolModule.identifier,
@@ -68,6 +83,12 @@ export const machine: Machine = {
                     max: [345, 357, 0], // Correct this later
                 },
                 disableRemoteStartPrint: true,
+                runBoundaryModeOptions: [
+                    // {
+                    //     label: 'Laser Spot',
+                    //     value: JobOffsetMode.LaserSpot,
+                    // },
+                ]
             },
             {
                 identifier: L40WLaserToolModule.identifier,
@@ -77,17 +98,46 @@ export const machine: Machine = {
                     max: [345, 357, 0], // Correct this later
                 },
                 disableRemoteStartPrint: true,
+                runBoundaryModeOptions: [
+                    // {
+                    //     label: 'Laser Spot',
+                    //     value: JobOffsetMode.LaserSpot,
+                    // },
+                ]
+            },
+            {
+                identifier: L2WLaserToolModule.identifier,
+                configPath: 'laser/a350_2w', // 'laser/a350_2w',
+                // workRange: {
+                //     min: [0, 0, 0],
+                //     max: [345, 357, 0], // Correct this later
+                // },
+                disableRemoteStartPrint: false,
+                runBoundaryModeOptions: [
+                    {
+                        label: 'Crosshair',
+                        value: JobOffsetMode.Crosshair,
+                    }
+                ]
             },
             {
                 identifier: standardCNCToolHead.identifier,
                 configPath: 'cnc/a350_standard',
             },
+            {
+                identifier: highPower200WCNCToolHead.identifier,
+                configPath: 'cnc/200W',
+            }
         ],
 
         modules: [
             {
                 identifier: quickSwapKitModule.identifier,
-                workRangeOffset: [0, -15, 0],
+                workRangeOffset: [0, -15, -15],
+            },
+            {
+                identifier: bracingKitModule.identifier,
+                workRangeOffset: [0, -12, -6],
             }
         ],
 

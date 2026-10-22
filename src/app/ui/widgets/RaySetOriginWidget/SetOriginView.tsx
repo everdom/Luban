@@ -1,23 +1,55 @@
 import { WorkflowStatus } from '@snapmaker/luban-platform';
-import { Alert, Button, Radio, RadioChangeEvent, Space } from 'antd';
+import { Alert, Radio, RadioChangeEvent, Space } from 'antd';
 import { includes } from 'lodash';
 import React, { useCallback, useEffect, useState } from 'react';
 import { shallowEqual, useDispatch, useSelector } from 'react-redux';
-import { Box3 } from 'three';
 
+import controller from '../../../communication/socket-communication';
 import SocketEvent from '../../../communication/socket-events';
 import { JobOffsetMode } from '../../../constants/coordinate';
 import { RootState } from '../../../flux/index.def';
 import { actions as workspaceActions } from '../../../flux/workspace';
-import gcodeActions, { GCodeFileObject } from '../../../flux/workspace/actions-gcode';
-import controller from '../../../communication/socket-communication';
+import gcodeActions from '../../../flux/workspace/actions-gcode';
+import { AxisWorkRange, GCodeFileMetadata } from '../../../flux/workspace/types';
+import { Button } from '../../components/Buttons';
 import i18n from '../../../lib/i18n';
 import log from '../../../lib/log';
-import ControlPanel from './ControlPanel';
+import ControlPanel from '../ConnectionControl/Control';
 import RunBoundaryModal from './modals/RunBoundaryModal';
+import HomeTipModal from './modals/HomeTipModal';
+import { MotorPowerMode, SetupCoordinateMethod } from '../../../constants';
 
-export const getRunBoundayCode = (bbox: Box3, jobOffsetMode: JobOffsetMode) => {
+export const getRunBoundaryCode = (
+    axisWorkRange: AxisWorkRange,
+    jobOffsetMode: JobOffsetMode,
+    isRotate: boolean = false,
+    setupCoordinateMethod: SetupCoordinateMethod
+) => {
+    const useBInsteadOfX = isRotate;
+    const gCommand = jobOffsetMode === JobOffsetMode.Crosshair ? 'G1 S0' : 'G1 S10';
+
+    const goto = (x: number, y: number): string => {
+        let code = gCommand;
+
+        if (useBInsteadOfX) {
+            code += ` B${x || 0}`;
+        } else {
+            code += ` X${x || 0}`;
+        }
+
+        code += ` Y${y}`;
+        code += ' F6000';
+
+        return code;
+    };
+
     const gcodeList = [];
+
+    if (setupCoordinateMethod === SetupCoordinateMethod.ByControlPanel) {
+        gcodeList.push(
+            ';motor_mode: 3',
+        );
+    }
 
     if (jobOffsetMode === JobOffsetMode.Crosshair) {
         // Use crosshair to run boundary
@@ -25,25 +57,63 @@ export const getRunBoundayCode = (bbox: Box3, jobOffsetMode: JobOffsetMode) => {
     } else if (jobOffsetMode === JobOffsetMode.LaserSpot) {
         // Use laser spot to run boundary
         gcodeList.push('M3 S0');
-        gcodeList.push('G1 F6000 S10'); // turn on laser spot
+        gcodeList.push(`${gCommand} F6000`); // turn on laser spot
     }
 
     gcodeList.push(
         'G90', // absolute position
     );
 
-    gcodeList.push(
-        'G92 X0 Y0', // set current position as origin
-    );
+    // set current position as origin
+    if (setupCoordinateMethod !== SetupCoordinateMethod.ByControlPanel) {
+        gcodeList.push(
+            'G92 X0 Y0 B0',
+        );
+    }
 
-    gcodeList.push(
-        `G1 X${bbox.min.x} Y${bbox.min.y} F6000`, // run boundary
-        `G1 X${bbox.min.x} Y${bbox.max.y}`,
-        `G1 X${bbox.max.x} Y${bbox.max.y}`,
-        `G1 X${bbox.max.x} Y${bbox.min.y}`,
-        `G1 X${bbox.min.x} Y${bbox.min.y}`,
-        'G1 X0 Y0 S0', // go back to origin
-    );
+    if (useBInsteadOfX) {
+        gcodeList.push(
+            // run bounding box
+            goto(axisWorkRange.min.b, axisWorkRange.min.y),
+            goto(axisWorkRange.max.b, axisWorkRange.min.y),
+            goto(axisWorkRange.max.b, axisWorkRange.max.y),
+            goto(axisWorkRange.min.b, axisWorkRange.max.y),
+            goto(axisWorkRange.min.b, axisWorkRange.min.y),
+        );
+    } else {
+        gcodeList.push(
+            // run bounding box
+            goto(axisWorkRange.min.x, axisWorkRange.min.y),
+            goto(axisWorkRange.max.x, axisWorkRange.min.y),
+            goto(axisWorkRange.max.x, axisWorkRange.max.y),
+            goto(axisWorkRange.min.x, axisWorkRange.max.y),
+            goto(axisWorkRange.min.x, axisWorkRange.min.y),
+        );
+    }
+
+
+    if (setupCoordinateMethod === SetupCoordinateMethod.ByControlPanel) {
+        // go back to origin
+        if (useBInsteadOfX) {
+            gcodeList.push(
+                goto(
+                    axisWorkRange.min.b + (axisWorkRange.max.b - axisWorkRange.min.b) / 2,
+                    axisWorkRange.min.y + (axisWorkRange.max.y - axisWorkRange.min.y) / 2
+                )
+            );
+        } else {
+            gcodeList.push(
+                goto(
+                    axisWorkRange.min.x + (axisWorkRange.max.x - axisWorkRange.min.x) / 2,
+                    axisWorkRange.min.y + (axisWorkRange.max.y - axisWorkRange.min.y) / 2
+                )
+            );
+        }
+    } else {
+        gcodeList.push(
+            goto(0, 0)
+        );
+    }
 
     if (jobOffsetMode === JobOffsetMode.LaserSpot) {
         gcodeList.push('M5 S0'); // turn off laser spot
@@ -58,14 +128,6 @@ export const getRunBoundayCode = (bbox: Box3, jobOffsetMode: JobOffsetMode) => {
     return gcode;
 };
 
-
-enum SetupCoordinateMethod {
-    // Move tool manually
-    Manually = 'manually',
-
-    // Move tool using control panel
-    ByControlPanel = 'control-panel',
-}
 
 /**
  * Set Origin View for Ray.
@@ -83,12 +145,13 @@ interface SetOriginViewProps {
 }
 
 const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
+    const dispatch = useDispatch();
     const { setDisplay } = props;
 
-    const isConnected = useSelector((state: RootState) => state.workspace.isConnected);
+    const { isConnected, isRotate, isHomed, setupCoordinateMethod, isRayNewVersion } = useSelector((state: RootState) => state.workspace);
 
     // G-code
-    const boundingBox = useSelector((state: RootState) => state.workspace.boundingBox);
+    const gcodeFile: GCodeFileMetadata = useSelector((state: RootState) => state.workspace.gcodeFile);
     const workflowStatus = useSelector((state: RootState) => state.workspace.workflowStatus, shallowEqual);
 
     // display of widget
@@ -102,19 +165,78 @@ const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
         }
     }, [setDisplay, isConnected, workflowStatus]);
 
-    // setup coordinate method
-    const [setupCoordinateMethod, setSetupCoordinateMethod] = useState(SetupCoordinateMethod.Manually);
 
-    const onChangeCoordinateMode = useCallback((e: RadioChangeEvent) => {
-        setSetupCoordinateMethod(e.target.value);
-    }, []);
+    // Home Tip Modal state
+    const [showHomeTip, setShowHomeTip] = useState(false);
+
+    // setup coordinate method
+    const setSetupCoordinateMethod = (value: SetupCoordinateMethod) => {
+        dispatch(workspaceActions.updateState({ setupCoordinateMethod: value }));
+    };
+
+    // Motor hold Mode
+    const turnOnHoldMotorPower = async () => {
+        return new Promise((resolve) => {
+            controller
+                .emitEvent(SocketEvent.SetMotorPowerMode, { setMotorPowerHoldMod: MotorPowerMode.STAYPOWER })
+                .once(SocketEvent.SetMotorPowerMode, (result) => {
+                    resolve(result);
+                });
+        });
+    };
+    const turnOffHoldMotorPower = async () => {
+        return new Promise((resolve) => {
+            controller
+                .emitEvent(SocketEvent.SetMotorPowerMode, { setMotorPowerHoldMod: MotorPowerMode.SHUTAll })
+                .once(SocketEvent.SetMotorPowerMode, (result) => {
+                    resolve(result);
+                });
+        });
+    };
+    const getMotorPowerHoldMode = async () => {
+        return new Promise((resolve) => {
+            controller
+                .emitEvent(SocketEvent.SetMotorPowerMode, { setMotorPowerHoldMod: MotorPowerMode.GETCURRENTMODE })
+                .once(SocketEvent.SetMotorPowerMode, (result) => {
+                    resolve(result.result);
+                });
+        });
+    };
+    const onChangeCoordinateMode = (e: any | RadioChangeEvent) => {
+        if (!isConnected) {
+            return;
+        }
+        if (e.target.value === SetupCoordinateMethod.ByControlPanel) {
+            if (!isHomed) {
+                setShowHomeTip(true);
+                return;
+            }
+            setShowHomeTip(false);
+            setSetupCoordinateMethod(SetupCoordinateMethod.ByControlPanel);
+        } else {
+            turnOffHoldMotorPower();
+            setSetupCoordinateMethod(e.target.value);
+        }
+    };
+
+    useEffect(() => {
+        if (isConnected && !isRotate) {
+            getMotorPowerHoldMode().then((result) => {
+                const mode = result !== MotorPowerMode.STAYPOWER ? SetupCoordinateMethod.Manually : SetupCoordinateMethod.ByControlPanel;
+                onChangeCoordinateMode({ target: { value: mode } });
+            });
+        }
+    }, [isHomed, isConnected, isRotate]);
+    useEffect(() => {
+        if (isRotate) {
+            turnOffHoldMotorPower();
+        }
+    }, [isRotate]);
 
     // run boundary state
     const [runBoundaryUploading, setRunBoundaryUploading] = useState(false);
     const [runBoundaryReady, setRunBoundaryReady] = useState(false);
     const jobOffsetMode: JobOffsetMode = useSelector((state: RootState) => state.laser.jobOffsetMode);
-
-    const dispatch = useDispatch();
 
     /**
      * Run boundary
@@ -123,19 +245,21 @@ const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
      */
     const runBoundary = useCallback(async () => {
         setRunBoundaryReady(false);
-        if (!boundingBox) {
-            log.warn('No bounding box provided, please upload G-code first.');
+        if (!gcodeFile) {
+            log.warn('No bounding box provided, please upload G-code first. ');
             return;
         }
+        const gcodeIsRotate = gcodeFile?.is_rotate;
+        const workRange = gcodeFile.gcodeAxisWorkRange;
 
-        log.info('Run Boundary... bbox =', boundingBox);
+        log.info('Run Boundary... axis work range =', workRange);
 
-        const gcode = getRunBoundayCode(boundingBox, jobOffsetMode);
+        const gcode = getRunBoundaryCode(workRange, jobOffsetMode, gcodeIsRotate, setupCoordinateMethod);
 
         const blob = new Blob([gcode], { type: 'text/plain' });
         const file = new File([blob], 'boundary.nc');
 
-        const gcodeFileObject: GCodeFileObject = await dispatch(gcodeActions.uploadGcodeFile(file));
+        const gcodeFileObject: GCodeFileMetadata = await dispatch(gcodeActions.uploadGcodeFile(file));
 
         setRunBoundaryUploading(true);
         controller
@@ -156,11 +280,17 @@ const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
                 log.info('Uploaded boundary G-code.');
                 setRunBoundaryReady(true);
             });
-    }, [dispatch, boundingBox, jobOffsetMode]);
+    }, [dispatch, isRotate, gcodeFile, jobOffsetMode, setupCoordinateMethod]);
 
-    const executeGCode = useCallback(async (gcode: string) => {
-        return dispatch(workspaceActions.executeGcode(gcode)) as unknown as Promise<void>;
+    const onClickGoHome = useCallback(async () => {
+        return dispatch(workspaceActions.executeGcode('$H')) as unknown as Promise<void>;
     }, [dispatch]);
+
+    const setControlPanelCoordinateMethod = () => {
+        turnOnHoldMotorPower();
+        onClickGoHome();
+        setSetupCoordinateMethod(SetupCoordinateMethod.ByControlPanel);
+    };
 
     return (
         <div>
@@ -172,11 +302,18 @@ const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
                             <span className="display-block color-black-3">{i18n._('You need to manually move the toolhead to the desired XY work origin.')}</span>
                         </Radio>
                         {/* Hide by control panel method */
-                            false && (
+                            isRayNewVersion && !isRotate && (
                                 <Radio value={SetupCoordinateMethod.ByControlPanel}>
                                     <span className="display-block font-weight-bold">{i18n._('Control Mode')}</span>
                                     <span className="display-block color-black-3">{i18n._('You need to use the Control panel to move the toolhead to the desired XY work origin.')}</span>
                                 </Radio>
+                            )
+                        }
+
+                        {/* tip for those who have not update firmware yet */}
+                        {
+                            !isRayNewVersion && (
+                                <Alert type="warning" showIcon message={i18n._('To access the control mode feature, please consider updating your firmware to version V1.6.8 or higher.')} />
                             )
                         }
                     </Space>
@@ -189,27 +326,36 @@ const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
                             <Button
                                 type="default"
                                 style={{ width: '100%', borderRadius: '4px' }}
-                                disabled={!boundingBox}
+                                onClick={onClickGoHome}
+                            >
+                                {i18n._('key-Workspace/Connection-Go Home')}
+                            </Button>
+                            <Button
+                                type="primary"
+                                style={{ width: '100%', borderRadius: '4px' }}
+                                className="margin-top-8"
+                                disabled={!gcodeFile?.gcodeAxisWorkRange}
                                 loading={runBoundaryUploading}
                                 onClick={async () => runBoundary()}
                             >
-                                {i18n._('Run Boundary')}
+                                {!runBoundaryUploading && i18n._('Run Boundary')}
                             </Button>
                         </div>
-                        <Space direction="vertical" className="margin-top-8">
-                            <Alert type="info" showIcon message={i18n._('Steppers are disabled. You can push XY axes to move the tool head.')} />
-                        </Space>
+                        {
+                            isRayNewVersion && (
+                                <Space direction="vertical" className="margin-top-8">
+                                    <Alert type="info" showIcon message={i18n._('Steppers are disabled. You can push XY axes to move the tool head.')} />
+                                </Space>
+                            )
+                        }
                     </div>
                 )
             }
 
             {
-                setupCoordinateMethod === SetupCoordinateMethod.ByControlPanel && (
+                !isRotate && setupCoordinateMethod === SetupCoordinateMethod.ByControlPanel && isRayNewVersion && (
                     <div className="margin-top-16">
-                        <ControlPanel
-                            executeGCode={executeGCode}
-                            runBoundary={async () => runBoundary()}
-                        />
+                        <ControlPanel widgetId="control" isNotInWorkspace={false} runBoundary={runBoundary} canABPosition={isRayNewVersion} />
                     </div>
                 )
             }
@@ -217,6 +363,21 @@ const SetOriginView: React.FC<SetOriginViewProps> = (props) => {
             {/* Run Boundary modal */
                 runBoundaryReady && (
                     <RunBoundaryModal onClose={() => setRunBoundaryReady(false)} />
+                )
+            }
+
+            {/* Go Home tip */
+                showHomeTip && (
+                    <HomeTipModal
+                        onClose={() => {
+                            onChangeCoordinateMode({ target: { value: SetupCoordinateMethod.Manually } });
+                            setShowHomeTip(false);
+                        }}
+                        onOk={() => {
+                            setControlPanelCoordinateMethod();
+                            setShowHomeTip(false);
+                        }}
+                    />
                 )
             }
         </div>

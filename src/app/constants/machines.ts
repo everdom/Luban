@@ -1,4 +1,4 @@
-import type { Machine, MachineModule, MachineToolHeadOptions, ToolHead, ToolHeadType } from '@snapmaker/luban-platform';
+import type { Machine, MachineModule, MachineToolHeadOptions, ToolHead, ToolHeadType, RunBoundaryModeOption } from '@snapmaker/luban-platform';
 
 import i18n from '../lib/i18n';
 import {
@@ -11,11 +11,13 @@ import {
     SnapmakerOriginalMachine,
     SnapmakerRayMachine
 } from '../machines';
-import { quickSwapKitModule } from '../machines/snapmaker-2-modules';
+import { quickSwapKitModule, bracingKitModule } from '../machines/snapmaker-2-modules';
 import {
     L20WLaserToolModule,
+    L2WLaserToolModule,
     L40WLaserToolModule,
     dualExtrusionPrintToolHead,
+    dualExtrusionPrintToolHeadForArtisan,
     highPower200WCNCToolHead as highPower200WCNCToolHeadSM2,
     highPower10WLaserToolHead as laser10WToolHeadSM2,
     printToolHead as printToolHeadSM2,
@@ -36,6 +38,7 @@ import {
 export const SINGLE_EXTRUDER_TOOLHEAD_FOR_ORIGINAL = 'singleExtruderToolheadForOriginal';
 export const SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2 = 'singleExtruderToolheadForSM2';
 export const DUAL_EXTRUDER_TOOLHEAD_FOR_SM2 = 'dualExtruderToolheadForSM2';
+export const DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN = 'dualExtruderToolheadForArtisan';
 export const LEVEL_ONE_POWER_LASER_FOR_ORIGINAL = 'levelOneLaserToolheadForOriginal';
 export const LEVEL_TWO_POWER_LASER_FOR_ORIGINAL = 'levelTwoLaserToolheadForOriginal';
 export const LEVEL_ONE_POWER_LASER_FOR_SM2 = 'levelOneLaserToolheadForSM2';
@@ -59,13 +62,13 @@ export const DEFAULT_MACHINE_ORIGINAL_LONG_Z_AXIS = 'Original Long Z-axis';
 
 // todo: refactor this data structure
 export const MACHINE_SERIES = {
-    ORIGINAL: SnapmakerOriginalMachine,
-    ORIGINAL_LZ: SnapmakerOriginalExtendedMachine,
+    [SnapmakerOriginalMachine.identifier]: SnapmakerOriginalMachine,
+    [SnapmakerOriginalExtendedMachine.identifier]: SnapmakerOriginalExtendedMachine,
     [SnapmakerA150Machine.identifier]: SnapmakerA150Machine,
     [SnapmakerA250Machine.identifier]: SnapmakerA250Machine,
-    A350: SnapmakerA350Machine,
-    A400: SnapmakerArtisanMachine,
-    J1: SnapmakerJ1Machine,
+    [SnapmakerA350Machine.identifier]: SnapmakerA350Machine,
+    [SnapmakerArtisanMachine.identifier]: SnapmakerArtisanMachine,
+    [SnapmakerJ1Machine.identifier]: SnapmakerJ1Machine,
 };
 
 export const HEAD_PRINTING = 'printing';
@@ -79,6 +82,7 @@ export const MACHINE_TOOL_HEADS = {
     [STANDARD_CNC_TOOLHEAD_FOR_ORIGINAL]: cncToolHeadOriginal,
     [SINGLE_EXTRUDER_TOOLHEAD_FOR_SM2]: printToolHeadSM2,
     [DUAL_EXTRUDER_TOOLHEAD_FOR_SM2]: dualExtrusionPrintToolHead,
+    [DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN]: dualExtrusionPrintToolHeadForArtisan,
     [LEVEL_ONE_POWER_LASER_FOR_SM2]: standardLaserToolHeadSM2,
     [LEVEL_TWO_POWER_LASER_FOR_SM2]: laser10WToolHeadSM2,
     [STANDARD_CNC_TOOLHEAD_FOR_SM2]: standardCNCToolHeadSM2,
@@ -86,6 +90,7 @@ export const MACHINE_TOOL_HEADS = {
     [printToolHeadJ1.identifier]: printToolHeadJ1,
     [L20WLaserToolModule.identifier]: L20WLaserToolModule,
     [L40WLaserToolModule.identifier]: L40WLaserToolModule,
+    [L2WLaserToolModule.identifier]: L2WLaserToolModule,
 };
 
 // Module IDs
@@ -96,11 +101,14 @@ export const MODULEID_MAP = {
     '5': ENCLOSURE_FOR_SM2,
     7: AIR_PURIFIER,
     '13': DUAL_EXTRUDER_TOOLHEAD_FOR_SM2,
+    '70000': DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN,
     '14': LEVEL_TWO_POWER_LASER_FOR_SM2,
     '15': LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2,
     '16': ENCLOSURE_FOR_ARTISAN,
     19: L20WLaserToolModule.identifier,
     20: L40WLaserToolModule.identifier,
+    23: L2WLaserToolModule.identifier,
+    // ?
     '512': HEADT_BED_FOR_SM2,
     '513': SNAPMAKER_J1_HEATED_BED,
     '514': SNAPMAKER_J1_LINEAR_MODULE,
@@ -120,6 +128,7 @@ export const LASER_HEAD_MODULE_IDS = [
     14, // 10W Laser Module
     19, // 20W Laser Module
     20, // 40W Laser Module
+    23, // 2W Laser Module
 ];
 export const CNC_HEAD_MODULE_IDS = [
     1, // Standard CNC Module
@@ -143,10 +152,12 @@ export const MODULEID_TOOLHEAD_MAP = {
     '1': STANDARD_CNC_TOOLHEAD_FOR_SM2,
     '2': LEVEL_ONE_POWER_LASER_FOR_SM2,
     '13': DUAL_EXTRUDER_TOOLHEAD_FOR_SM2,
+    '70000': DUAL_EXTRUDER_TOOLHEAD_FOR_ARTISAN,
     '14': LEVEL_TWO_POWER_LASER_FOR_SM2,
     '15': LEVEL_TWO_CNC_TOOLHEAD_FOR_SM2,
     19: L20WLaserToolModule.identifier,
     20: L40WLaserToolModule.identifier,
+    23: L2WLaserToolModule.identifier,
     '00': printToolHeadJ1.identifier,
 };
 
@@ -265,6 +276,10 @@ export function getMachineSupportedToolOptions(machineSeries: string, headType =
     }
 
     return options;
+}
+
+export function getSupportedRunBoundaryModeOptions(machine: Machine, toolIdentifer: string): RunBoundaryModeOption[] {
+    return machine?.metadata?.toolHeads.find(toolHead => toolHead.identifier === toolIdentifer).runBoundaryModeOptions;
 }
 
 export function isDualExtruder(identifier: string): boolean {
@@ -395,6 +410,7 @@ export function getMachineToolOptions(machineIdentifier: string, toolIdentifier:
 export function findMachineModule(identifier: string): MachineModule | null {
     const availableModules = [
         quickSwapKitModule,
+        bracingKitModule
     ];
 
     for (const module of availableModules) {
@@ -465,5 +481,52 @@ export const LASER_1600MW_CALIBRATION_POSITION = {
     },
 };
 
+export function getErrorReportReason(ownerId: string, errorCode: string): string {
+    const ERROR_REPORT_REASON = {
+        // Air Purifier module
+        '7-1': i18n._('Air Purifier Disconnected. Please power off the machine, replug the Air Purifier, and restart. If the problem persists, contact our Support for help.'),
+
+        // Emergency Stop
+        '8-1': i18n._('Emergency Stop. Please make sure that there is no danger and restart the machine after releasing the emergency stop switch.'),
+
+        // 20W laser module
+        '19-1': i18n._('Abnormal Toolhead Orientation Detection. Please contact our Support for help.'),
+        '19-2': i18n._('Laser Emitter Overheat. Please power off the machine, wait for a while, and restart.If this occurs frequently, contact our Support for help.'),
+        '19-3': i18n._('Slanting Toolhead. Please reinstall the toolhead and make sure it does not slant in any direction. If this occurs frequently, contact our Support for help.'),
+        '19-4': i18n._('Abnormal Laser Emitter. Please contact our Support for help.'),
+        '19-5': i18n._('Abnormal Laser Heat Dissipation. Please contact our Support for help.'),
+        '19-6': i18n._('Flame detected. Please short press the button to resume work when it is safe to do so. The sensitivity of the flame detection can be modified in the machine settings.'),
+        '19-9': i18n._('Abnormal Laser Temperature Sensor. Please contact our Support for help.'),
+        '19-10': i18n._('Laser PCBA Overheat. Please power off the machine, wait for a while, and restart. If this occurs frequently, contact our Support for help.'),
+        '19-12': i18n._('Toolhead Disconnected. Please power off the machine, replug the toolhead, and restart. If the problem persists, contact our Support for help.'),
+        '19-14': i18n._('Laser Locked. Please unlock it on the controller.'),
+
+        // 40W laser module
+        '20-1': i18n._('Abnormal Toolhead Orientation Detection. Please contact our Support for help.'),
+        '20-2': i18n._('Laser Emitter Overheat. Please power off the machine, wait for a while, and restart.If this occurs frequently, contact our Support for help.'),
+        '20-3': i18n._('Slanting Toolhead. Please reinstall the toolhead and make sure it does not slant in any direction. If this occurs frequently, contact our Support for help.'),
+        '20-4': i18n._('Abnormal Laser Emitter. Please contact our Support for help.'),
+        '20-5': i18n._('Abnormal Laser Heat Dissipation. Please contact our Support for help.'),
+        '20-6': i18n._('Flame detected. Please short press the button to resume work when it is safe to do so. The sensitivity of the flame detection can be modified in the machine settings.'),
+        '20-9': i18n._('Abnormal Laser Temperature Sensor. Please contact our Support for help.'),
+        '20-10': i18n._('Laser PCBA Overheat. Please power off the machine, wait for a while, and restart. If this occurs frequently, contact our Support for help.'),
+        '20-12': i18n._('Toolhead Disconnected. Please power off the machine, replug the toolhead, and restart. If the problem persists, contact our Support for help.'),
+        '20-14': i18n._('Laser Locked. Please unlock it on the controller.'),
+
+        // Linear Module
+        '516-7': i18n._('Overstep the limit. X-axis limit switch triggered. Range of motion exceeds machine boundaries. If it occurs during machining, adjust the machine home position or confirm that the Gcode is correct.'),
+        '516-8': i18n._('Overstep the limit. Y-axis limit switch triggered. Range of motion exceeds machine boundaries. If it occurs during machining, adjust the machine home position or confirm that the Gcode is correct.'),
+
+        // Snapmaker Ray - Enclosure
+        '518-2': i18n._('The Enclosure door is opened or Enclosure disconnected. Please close the door or power off the machine, replug the Enclosure.If there is no Enclosure, please turn off door detection in the machine setting.'),
+
+        // Snapmaker Ray - Controller
+        '2051-1': i18n._('Toolhead not detected. Please power off the machine, plug the toolhead into the controller, and restart. If the problem persists, contact our Support for help.'),
+        '2051-5': i18n._('Failed to Home.Please check if any Linear Module is prevented from moving.If the problem persists, contact our Support for help.'),
+    };
+
+    const id = `${ownerId}-${errorCode}`;
+    return ERROR_REPORT_REASON[id] || null;
+}
 
 export default {};

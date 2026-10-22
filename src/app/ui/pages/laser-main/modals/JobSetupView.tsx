@@ -1,5 +1,5 @@
 import { Machine } from '@snapmaker/luban-platform';
-import { includes } from 'lodash';
+// import { includes } from 'lodash';
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 
@@ -24,11 +24,10 @@ import { RootState } from '../../../../flux/index.def';
 import useSetState from '../../../../lib/hooks/set-state';
 import i18n from '../../../../lib/i18n';
 import { toFixed } from '../../../../lib/numeric-utils';
-import { SnapmakerRayMachine } from '../../../../machines';
-import { L20WLaserToolModule, L40WLaserToolModule } from '../../../../machines/snapmaker-2-toolheads';
 import { NumberInput as Input } from '../../../components/Input';
 import Select from '../../../components/Select';
 import TipTrigger from '../../../components/TipTrigger';
+import { getSupportedRunBoundaryModeOptions } from '../../../../constants/machines';
 
 
 export type JobSetupViewHandle = {
@@ -46,7 +45,7 @@ const JobSetupView = React.forwardRef<JobSetupViewHandle, {}>((_, ref) => {
     const materials = useSelector((state: RootState) => state[HEAD_LASER]?.materials, shallowEqual) as Materials;
     const origin = useSelector((state: RootState) => state[HEAD_LASER].origin, shallowEqual) as Origin;
 
-    const { inProgress, useBackground } = useSelector((state: RootState) => state[HEAD_LASER]);
+    const { inProgress, useBackground, useABPosition } = useSelector((state: RootState) => state[HEAD_LASER]);
 
     // workpiece
     const [workpiece, updateWorkpiece] = useSetState<Workpiece>({
@@ -166,35 +165,12 @@ const JobSetupView = React.forwardRef<JobSetupViewHandle, {}>((_, ref) => {
     const [selectedJobOffsetMode, setSelectedJobOffsetMode] = useState(jobOffsetMode);
 
     const runBoundaryModeOptions = useMemo(() => {
-        // hard-coded for ray machine
-        if (includes([L20WLaserToolModule.identifier, L40WLaserToolModule.identifier], toolIdentifer)) {
-            if (activeMachine?.identifier === SnapmakerRayMachine.identifier) {
-                return [
-                    {
-                        label: i18n._('Crosshair'),
-                        value: JobOffsetMode.Crosshair,
-                    },
-                    {
-                        label: i18n._('Laser Spot'),
-                        value: JobOffsetMode.LaserSpot,
-                    },
-                ];
-            } else {
-                return [
-                    {
-                        label: i18n._('Crosshair'),
-                        value: JobOffsetMode.Crosshair,
-                    },
-                ];
-            }
-        } else {
-            return [
-                {
-                    label: i18n._('Laser Spot'),
-                    value: JobOffsetMode.LaserSpot,
-                },
-            ];
-        }
+        const _runBoundaryModeOptions = getSupportedRunBoundaryModeOptions(activeMachine, toolIdentifer) || [];
+
+        return _runBoundaryModeOptions.map(option => ({
+            label: i18n._(option.label),
+            value: option.value
+        }));
     }, [activeMachine, toolIdentifer]);
 
     // Check job offset mode options
@@ -202,8 +178,10 @@ const JobSetupView = React.forwardRef<JobSetupViewHandle, {}>((_, ref) => {
         const targetOption = runBoundaryModeOptions.find(option => option.value === jobOffsetMode);
         if (targetOption) {
             setSelectedJobOffsetMode(jobOffsetMode);
-        } else {
+        } else if (runBoundaryModeOptions.length > 0) {
             setSelectedJobOffsetMode(runBoundaryModeOptions[0].value);
+        } else {
+            setSelectedJobOffsetMode(JobOffsetMode.Crosshair);
         }
     }, [jobOffsetMode, runBoundaryModeOptions]);
 
@@ -223,10 +201,12 @@ const JobSetupView = React.forwardRef<JobSetupViewHandle, {}>((_, ref) => {
         imgOF3axisCoordinateMode = `/resources/images/cnc-laser/working-origin-3-${selectedOrigin.reference}.png`;
     }
 
-    let settingSizeDisabled = false;
-    if (useBackground) {
-        settingSizeDisabled = true;
-    }
+    const [settingSizeDisabled, setSettingSizeDisabled] = useState(false);
+    useEffect(() => {
+        if (useBackground || useABPosition) {
+            setSettingSizeDisabled(true);
+        }
+    }, [useBackground, useABPosition]);
 
     const dispatch = useDispatch();
     useImperativeHandle(ref, () => {
@@ -492,29 +472,34 @@ const JobSetupView = React.forwardRef<JobSetupViewHandle, {}>((_, ref) => {
                     )
                 }
             </div>
-            <div className="margin-top-24">
-                <div className="margin-bottom-16 font-weight-bold">
-                    {i18n._('Job Offset')}
-                </div>
-                <TipTrigger
-                    title={i18n._('Job Offset Mode')}
-                    content={i18n._('Crosshair mode uses the crosshair for positioning, while Laser shot mode uses the working laser for positioning.')}
-                >
-                    <div className="sm-flex justify-space-between height-32">
-                        <span className="width-144 margin-right-8 text-overflow-ellipsis">
 
-                            {i18n._('Job Offset Mode')}
-                        </span>
-                        <Select
-                            className="width-120"
-                            options={runBoundaryModeOptions}
-                            value={selectedJobOffsetMode}
-                            onChange={onChangeJobOffsetMode}
-                            disabled={runBoundaryModeOptions.length <= 1}
-                        />
+            {
+                runBoundaryModeOptions.length > 0 && (
+                    <div className="margin-top-24">
+                        <div className="margin-bottom-16 font-weight-bold">
+                            {i18n._('Job Offset')}
+                        </div>
+                        <TipTrigger
+                            title={i18n._('Job Offset Mode')}
+                            content={i18n._('Crosshair mode uses the crosshair for positioning, while Laser Spot mode uses the working laser for positioning.')}
+                        >
+                            <div className="sm-flex justify-space-between height-32">
+                                <span className="width-144 margin-right-8 text-overflow-ellipsis">
+
+                                    {i18n._('Job Offset Mode')}
+                                </span>
+                                <Select
+                                    className="width-120"
+                                    options={runBoundaryModeOptions}
+                                    value={selectedJobOffsetMode}
+                                    onChange={onChangeJobOffsetMode}
+                                    disabled={runBoundaryModeOptions.length <= 1}
+                                />
+                            </div>
+                        </TipTrigger>
                     </div>
-                </TipTrigger>
-            </div>
+                )
+            }
         </div>
     );
 });

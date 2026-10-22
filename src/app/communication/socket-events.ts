@@ -27,6 +27,7 @@ enum SocketEvent {
     Move = 'connection:coordinateMove', // Linear Move
     SetOrigin = 'connection:setWorkOrigin',
     SetSpeedFactor = 'connection:updateWorkSpeedFactor',
+    SetMotorPowerMode = 'connection:setMotorPowerMode',
 
     /**
      * 3D Printing
@@ -42,9 +43,12 @@ enum SocketEvent {
      * Laser
      */
     SetLaserPower = 'connection:updateLaserPower',
-    SwitchLaserPower = 'connection:switchLaserPower', // ?
+    TurnOnTestLaser = 'connection:turn-on-test-laser',
+    TurnOffLaser = 'connectoin:turn-off-laser',
     CalcMaterialThickness = 'connection:materialThickness',
     AbortMaterialThickness = 'connection:materialThickness_abort',
+    TurnOnCrosshair = 'connection:turn-on-crosshair',
+    TurnOffCrosshair = 'connection:turn-off-crosshair',
     GetCrosshairOffset = 'connection:get-crosshair-offset',
     SetCrosshairOffset = 'connection:set-crosshair-offset',
     GetFireSensorSensitivity = 'connection:get-fire-sensor-sensitivity',
@@ -90,8 +94,11 @@ enum SocketEvent {
     /**
      * Machine System
      */
+    ErrorReport = 'machine:error-report',
     ExportLogToExternalStorage = 'machine:export-log-to-external-storage',
     GetFirmwareVersion = 'machine:get-firmware-version',
+    GetLatestFirmwareVersion = 'machine:get-latest-firmware-version',
+    DownloadLatestFirmware = 'machine:download-latest-firmware',
     UpgradeFirmware = 'machine:upgrade-firmware',
 
     /**
@@ -106,6 +113,11 @@ enum SocketEvent {
      * Operating System
      */
     ListWiFiNetworks = 'os:list-wifi-networks',
+
+    /**
+     * Octo onResetPort
+     */
+    OnResetPort = 'otco:onResetPort',
 }
 
 export default SocketEvent;
